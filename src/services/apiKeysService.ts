@@ -27,25 +27,49 @@ export interface SaveApiKeyParams {
   model?: string;
 }
 
-// Provider display info
-export const PROVIDER_INFO: Record<LLMProvider, { name: string; models: string[]; defaultModel: string; keyPrefix: string }> = {
+// Provider display info with latest models (2025)
+export const PROVIDER_INFO: Record<LLMProvider, { name: string; models: string[]; defaultModel: string; keyPrefix: string; description: string }> = {
   anthropic: {
     name: 'Anthropic',
-    models: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-3-5-sonnet-20241022'],
+    models: [
+      'claude-sonnet-4-20250514',
+      'claude-opus-4-20250514',
+      'claude-3-7-sonnet-20250219',
+      'claude-3-5-sonnet-20241022',
+      'claude-3-5-haiku-20241022',
+    ],
     defaultModel: 'claude-sonnet-4-20250514',
     keyPrefix: 'sk-ant-',
+    description: 'Best for creative and nuanced responses. Claude 4 Sonnet offers excellent quality-to-speed ratio.',
   },
   openai: {
     name: 'OpenAI',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-    defaultModel: 'gpt-4o',
+    models: [
+      'gpt-4.1',
+      'gpt-4.1-mini',
+      'gpt-4.1-nano',
+      'gpt-4o',
+      'gpt-4o-mini',
+      'o1',
+      'o1-mini',
+      'o3-mini',
+    ],
+    defaultModel: 'gpt-4.1',
     keyPrefix: 'sk-',
+    description: 'Versatile and widely-used. GPT-4.1 provides great performance across various tasks.',
   },
   google: {
     name: 'Google AI',
-    models: ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro'],
-    defaultModel: 'gemini-1.5-pro',
+    models: [
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-1.5-pro',
+      'gemini-1.5-flash',
+      'gemini-1.5-flash-8b',
+    ],
+    defaultModel: 'gemini-2.0-flash',
     keyPrefix: 'AIza',
+    description: 'Google\'s latest models with strong multimodal capabilities and competitive pricing.',
   },
 };
 

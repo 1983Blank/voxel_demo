@@ -15,6 +15,8 @@ import {
   Tabs,
   Divider,
   Tooltip,
+  Modal,
+  AutoComplete,
 } from 'antd';
 import {
   KeyOutlined,
@@ -43,9 +45,10 @@ function ApiKeysTab() {
   const [apiKeys, setApiKeys] = useState<ApiKeyConfig[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [selectedProvider, setSelectedProvider] = useState<LLMProvider>('anthropic');
+  const [customModel, setCustomModel] = useState('');
 
   const fetchApiKeys = async () => {
     setIsLoading(true);
@@ -64,6 +67,23 @@ function ApiKeysTab() {
     fetchApiKeys();
   }, []);
 
+  const openModal = () => {
+    setSelectedProvider('anthropic');
+    setCustomModel('');
+    form.resetFields();
+    form.setFieldsValue({
+      provider: 'anthropic',
+      model: PROVIDER_INFO['anthropic'].defaultModel,
+    });
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    form.resetFields();
+    setCustomModel('');
+  };
+
   const handleAddKey = async (values: { provider: LLMProvider; apiKey: string; model?: string }) => {
     // Validate format
     const validation = validateApiKeyFormat(values.provider, values.apiKey);
@@ -77,11 +97,10 @@ function ApiKeysTab() {
       await saveApiKey({
         provider: values.provider,
         apiKey: values.apiKey,
-        model: values.model,
+        model: values.model || customModel || PROVIDER_INFO[values.provider].defaultModel,
       });
       message.success(`${PROVIDER_INFO[values.provider].name} API key saved securely`);
-      form.resetFields();
-      setShowAddForm(false);
+      closeModal();
       fetchApiKeys();
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Failed to save API key');
@@ -108,6 +127,13 @@ function ApiKeysTab() {
     } catch (error) {
       message.error('Failed to set active provider');
     }
+  };
+
+  const handleProviderChange = (provider: LLMProvider) => {
+    setSelectedProvider(provider);
+    const defaultModel = PROVIDER_INFO[provider].defaultModel;
+    form.setFieldValue('model', defaultModel);
+    setCustomModel(defaultModel);
   };
 
   const columns = [
@@ -180,6 +206,12 @@ function ApiKeysTab() {
 
   const providerInfo = PROVIDER_INFO[selectedProvider];
 
+  // Create model options for autocomplete
+  const modelOptions = providerInfo.models.map(model => ({
+    value: model,
+    label: model,
+  }));
+
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
@@ -202,7 +234,15 @@ function ApiKeysTab() {
       />
 
       {/* Configured Keys */}
-      <Card title="Configured Providers" style={{ marginBottom: 24 }}>
+      <Card
+        title="Configured Providers"
+        style={{ marginBottom: 24 }}
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={openModal}>
+            Add Provider
+          </Button>
+        }
+      >
         <Table
           columns={columns}
           dataSource={apiKeys}
@@ -220,7 +260,7 @@ function ApiKeysTab() {
                   type="primary"
                   icon={<PlusOutlined />}
                   style={{ marginTop: 16 }}
-                  onClick={() => setShowAddForm(true)}
+                  onClick={openModal}
                 >
                   Add Your First Key
                 </Button>
@@ -228,154 +268,160 @@ function ApiKeysTab() {
             ),
           }}
         />
-
-        {apiKeys.length > 0 && !showAddForm && (
-          <Button
-            type="dashed"
-            icon={<PlusOutlined />}
-            onClick={() => setShowAddForm(true)}
-            style={{ marginTop: 16 }}
-            block
-          >
-            Add Another Provider
-          </Button>
-        )}
       </Card>
 
-      {/* Add Key Form */}
-      {showAddForm && (
-        <Card
-          title="Add API Key"
-          extra={
-            <Button type="text" onClick={() => setShowAddForm(false)}>
-              Cancel
-            </Button>
-          }
+      {/* Add Provider Modal */}
+      <Modal
+        title={
+          <Space>
+            <KeyOutlined />
+            <span>Add API Key</span>
+          </Space>
+        }
+        open={isModalOpen}
+        onCancel={closeModal}
+        footer={null}
+        width={500}
+        destroyOnClose
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleAddKey}
+          initialValues={{ provider: 'anthropic', model: PROVIDER_INFO['anthropic'].defaultModel }}
+          style={{ marginTop: 16 }}
         >
-          <Form
-            form={form}
-            layout="vertical"
-            onFinish={handleAddKey}
-            initialValues={{ provider: 'anthropic' }}
+          <Form.Item
+            name="provider"
+            label="Provider"
+            rules={[{ required: true, message: 'Please select a provider' }]}
           >
-            <Form.Item
-              name="provider"
-              label="Provider"
-              rules={[{ required: true, message: 'Please select a provider' }]}
-            >
-              <Select
-                size="large"
-                onChange={(value: LLMProvider) => {
-                  setSelectedProvider(value);
-                  form.setFieldValue('model', PROVIDER_INFO[value].defaultModel);
+            <Select
+              size="large"
+              onChange={handleProviderChange}
+              options={[
+                { value: 'anthropic', label: 'Anthropic (Claude)' },
+                { value: 'openai', label: 'OpenAI (GPT)' },
+                { value: 'google', label: 'Google AI (Gemini)' },
+              ]}
+            />
+          </Form.Item>
+
+          <Alert
+            message={providerInfo.description}
+            type="info"
+            style={{ marginBottom: 16 }}
+            action={
+              <Button
+                type="link"
+                size="small"
+                onClick={() => {
+                  const urls: Record<LLMProvider, string> = {
+                    anthropic: 'https://console.anthropic.com/settings/keys',
+                    openai: 'https://platform.openai.com/api-keys',
+                    google: 'https://aistudio.google.com/app/apikey',
+                  };
+                  window.open(urls[selectedProvider], '_blank');
                 }}
-                options={[
-                  { value: 'anthropic', label: 'Anthropic (Claude)' },
-                  { value: 'openai', label: 'OpenAI (GPT)' },
-                  { value: 'google', label: 'Google AI (Gemini)' },
-                ]}
-              />
-            </Form.Item>
+              >
+                Get Key →
+              </Button>
+            }
+          />
 
-            <Form.Item
-              name="apiKey"
-              label="API Key"
-              rules={[{ required: true, message: 'Please enter your API key' }]}
-              extra={
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Key should start with "{providerInfo.keyPrefix}"
-                </Text>
+          <Form.Item
+            name="apiKey"
+            label="API Key"
+            rules={[{ required: true, message: 'Please enter your API key' }]}
+            extra={
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Key should start with "{providerInfo.keyPrefix}"
+              </Text>
+            }
+          >
+            <Input.Password
+              size="large"
+              placeholder={`${providerInfo.keyPrefix}...`}
+              prefix={<KeyOutlined />}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="model"
+            label="Default Model"
+            extra={
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Select a model or type a custom model name
+              </Text>
+            }
+          >
+            <AutoComplete
+              size="large"
+              options={modelOptions}
+              value={customModel}
+              onChange={setCustomModel}
+              placeholder="Select or enter model name"
+              filterOption={(input, option) =>
+                (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
               }
-            >
-              <Input.Password
-                size="large"
-                placeholder={`${providerInfo.keyPrefix}...`}
-                prefix={<KeyOutlined />}
-              />
-            </Form.Item>
+            />
+          </Form.Item>
 
-            <Form.Item
-              name="model"
-              label="Default Model"
-              initialValue={providerInfo.defaultModel}
-            >
-              <Select
-                size="large"
-                options={providerInfo.models.map(model => ({
-                  value: model,
-                  label: model,
-                }))}
-              />
-            </Form.Item>
+          <Divider />
 
-            <Divider />
-
-            <Form.Item style={{ marginBottom: 0 }}>
-              <Space>
-                <Button type="primary" htmlType="submit" loading={isSubmitting} icon={<SafetyOutlined />}>
-                  Save Securely
-                </Button>
-                <Button onClick={() => setShowAddForm(false)}>Cancel</Button>
-              </Space>
-            </Form.Item>
-          </Form>
-        </Card>
-      )}
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={closeModal}>Cancel</Button>
+              <Button type="primary" htmlType="submit" loading={isSubmitting} icon={<SafetyOutlined />}>
+                Save Securely
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
 
       {/* Provider Info Cards */}
       <div style={{ marginTop: 24 }}>
         <Title level={5}>Supported Providers</Title>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-          <Card size="small">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Text strong>Anthropic (Claude)</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Best for creative and nuanced responses. Claude Sonnet offers excellent quality-to-speed ratio.
-              </Text>
-              <Button
-                type="link"
-                size="small"
-                style={{ padding: 0 }}
-                onClick={() => window.open('https://console.anthropic.com/settings/keys', '_blank')}
-              >
-                Get API Key →
-              </Button>
-            </Space>
-          </Card>
+          {(['anthropic', 'openai', 'google'] as LLMProvider[]).map(provider => {
+            const info = PROVIDER_INFO[provider];
+            const urls: Record<LLMProvider, string> = {
+              anthropic: 'https://console.anthropic.com/settings/keys',
+              openai: 'https://platform.openai.com/api-keys',
+              google: 'https://aistudio.google.com/app/apikey',
+            };
+            const hasKey = apiKeys.some(k => k.provider === provider);
 
-          <Card size="small">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Text strong>OpenAI (GPT)</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Versatile and widely-used. GPT-4o provides great performance across various tasks.
-              </Text>
-              <Button
-                type="link"
+            return (
+              <Card
                 size="small"
-                style={{ padding: 0 }}
-                onClick={() => window.open('https://platform.openai.com/api-keys', '_blank')}
+                key={provider}
+                style={{ borderColor: hasKey ? '#52c41a' : undefined }}
               >
-                Get API Key →
-              </Button>
-            </Space>
-          </Card>
-
-          <Card size="small">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Text strong>Google AI (Gemini)</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Google's latest models with strong multimodal capabilities and competitive pricing.
-              </Text>
-              <Button
-                type="link"
-                size="small"
-                style={{ padding: 0 }}
-                onClick={() => window.open('https://aistudio.google.com/app/apikey', '_blank')}
-              >
-                Get API Key →
-              </Button>
-            </Space>
-          </Card>
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space>
+                    <Text strong>{info.name}</Text>
+                    {hasKey && <Tag color="green" style={{ margin: 0 }}>Configured</Tag>}
+                  </Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {info.description}
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    Models: {info.models.slice(0, 3).join(', ')}...
+                  </Text>
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0 }}
+                    onClick={() => window.open(urls[provider], '_blank')}
+                  >
+                    Get API Key →
+                  </Button>
+                </Space>
+              </Card>
+            );
+          })}
         </div>
       </div>
     </div>
