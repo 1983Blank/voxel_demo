@@ -159,25 +159,30 @@ export async function saveApiKey(params: SaveApiKeyParams): Promise<void> {
     throw new Error('You must be logged in to save API keys');
   }
 
-  // Call Edge Function to store in vault (service_role has vault permissions)
-  const { data, error } = await supabase.functions.invoke('store-api-key', {
-    body: {
+  // Call Edge Function directly with fetch (more reliable auth)
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const response = await fetch(`${supabaseUrl}/functions/v1/store-api-key`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+      'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify({
       provider,
       apiKey,
       keyName,
       model: model || providerInfo.defaultModel,
-    },
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-    },
+    }),
   });
 
-  if (error) {
-    console.error('Error saving API key:', error);
-    throw new Error(`Failed to save API key: ${error.message}`);
-  }
-
+  const data = await response.json();
   console.log('[apiKeysService] Edge Function response:', data);
+
+  if (!response.ok) {
+    console.error('Error saving API key:', data);
+    throw new Error(`Failed to save API key: ${data.error || response.statusText}`);
+  }
 
   if (!data?.success) {
     throw new Error(data?.error || data?.details || 'Failed to save API key');
@@ -213,17 +218,23 @@ export async function deleteApiKey(provider: LLMProvider): Promise<void> {
     throw new Error('You must be logged in to delete API keys');
   }
 
-  // Call Edge Function to delete from vault
-  const { data, error } = await supabase.functions.invoke('delete-api-key', {
-    body: { provider },
+  // Call Edge Function directly with fetch
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const response = await fetch(`${supabaseUrl}/functions/v1/delete-api-key`, {
+    method: 'POST',
     headers: {
-      Authorization: `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+      'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
     },
+    body: JSON.stringify({ provider }),
   });
 
-  if (error) {
-    console.error('Error deleting API key:', error);
-    throw new Error(`Failed to delete API key: ${error.message}`);
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error('Error deleting API key:', data);
+    throw new Error(`Failed to delete API key: ${data.error || response.statusText}`);
   }
 
   if (!data?.success) {
