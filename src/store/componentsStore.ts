@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import extractedComponents from '@/mock-captures/components/extracted-components.json';
 
 export interface ExtractedComponent {
   id: string;
@@ -79,7 +78,7 @@ const filterComponents = (
 };
 
 export const useComponentsStore = create<ComponentsState>((set, get) => ({
-  components: extractedComponents as ExtractedComponent[],
+  components: [], // Components will be fetched from Supabase
   selectedComponent: null,
   searchQuery: '',
   selectedCategory: null,

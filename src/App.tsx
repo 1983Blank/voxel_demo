@@ -1,5 +1,6 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ConfigProvider, App as AntApp } from 'antd';
+import { ConfigProvider, App as AntApp, Spin } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppLayout, AuthLayout } from '@/layouts';
 import {
@@ -55,6 +56,24 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  const { initialize, isLoading } = useAuthStore();
+
+  // Initialize auth on app startup
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
+  // Show loading while auth initializes
+  if (isLoading) {
+    return (
+      <ConfigProvider theme={theme}>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+          <Spin size="large" />
+        </div>
+      </ConfigProvider>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <ConfigProvider theme={theme}>

@@ -39,6 +39,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useScreensStore } from '@/store/screensStore';
+import { useAuthStore } from '@/store/authStore';
 import type { CapturedScreen } from '@/types';
 
 const { Title, Text } = Typography;
@@ -47,6 +48,7 @@ const { Dragger } = Upload;
 
 export function Screens() {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
   const {
     screens,
     isPreviewOpen,
@@ -58,6 +60,7 @@ export function Screens() {
     duplicateScreen,
     uploadScreen,
     initializeScreens,
+    fetchFromSupabase,
     isLoading,
     selectedIds,
     toggleSelectScreen,
@@ -77,6 +80,13 @@ export function Screens() {
   useEffect(() => {
     initializeScreens();
   }, [initializeScreens]);
+
+  // Refetch screens when user changes
+  useEffect(() => {
+    if (user?.id) {
+      fetchFromSupabase();
+    }
+  }, [user?.id, fetchFromSupabase]);
 
   // Exit selection mode when no items selected
   useEffect(() => {
@@ -301,21 +311,6 @@ export function Screens() {
                   }}
                 />
               </div>
-            )}
-
-            {/* Mock badge */}
-            {screen.isMock && (
-              <Tag
-                color="blue"
-                style={{
-                  position: 'absolute',
-                  top: 8,
-                  right: 8,
-                  zIndex: 10,
-                }}
-              >
-                Demo
-              </Tag>
             )}
 
             <div

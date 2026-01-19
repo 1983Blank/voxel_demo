@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Typography,
   Card,
@@ -259,17 +259,9 @@ export function Analytics() {
     setDateRange,
     getTimeSeriesData,
     getTopVariants,
-    generateMockData,
   } = useAnalyticsStore();
 
   const [selectedScreenId, setSelectedScreenId] = useState<string | null>(null);
-
-  // Generate mock data on mount
-  useEffect(() => {
-    if (screenAnalytics.length === 0) {
-      generateMockData();
-    }
-  }, []);
 
   const timeSeriesData = getTimeSeriesData(selectedScreenId || undefined);
   const topVariants = getTopVariants(5);
