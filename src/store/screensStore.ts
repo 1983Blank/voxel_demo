@@ -165,7 +165,7 @@ export const useScreensStore = create<ScreensState>()(
 
             if (error) {
               console.error('Error saving to Supabase:', error);
-              throw new Error('Failed to save screen to database');
+              throw new Error(`Database error: ${error.message || error.code || 'Unknown'}`);
             }
 
             if (data) {

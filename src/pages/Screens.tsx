@@ -179,7 +179,8 @@ export function Screens() {
       form.resetFields();
     } catch (error) {
       console.error('Upload error:', error);
-      message.error('Failed to upload some files');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      message.error(`Upload failed: ${errorMessage}`);
     } finally {
       setIsUploading(false);
     }
