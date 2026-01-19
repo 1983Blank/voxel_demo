@@ -21,6 +21,8 @@ import {
   Slider,
   Collapse,
   Tabs,
+  Select,
+  Alert,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -31,7 +33,6 @@ import {
   RedoOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
-  SendOutlined,
   BulbOutlined,
   HistoryOutlined,
   AppstoreOutlined,
@@ -42,7 +43,6 @@ import {
   CopyOutlined,
   DeleteOutlined,
   ExperimentOutlined,
-  DownOutlined,
   UploadOutlined,
   PictureOutlined,
   FontSizeOutlined,
@@ -55,21 +55,27 @@ import {
   ItalicOutlined,
   ColumnWidthOutlined,
   ColumnHeightOutlined,
+  SettingOutlined,
+  RobotOutlined,
+  ThunderboltOutlined,
+  CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useScreensStore } from '@/store/screensStore';
 import { useEditorStore } from '@/store/editorStore';
 import { useComponentsStore } from '@/store/componentsStore';
 import { useContextStore } from '@/store/contextStore';
+import { generateHtml } from '@/services/llmService';
 import {
-  generateHtml,
-  isLLMConfigured,
-  saveLLMConfig,
-} from '@/services/llmService';
+  getApiKeys,
+  PROVIDER_INFO,
+  type ApiKeyConfig,
+  type LLMProvider,
+} from '@/services/apiKeysService';
 import { uploadImage, getUserImages } from '@/services/storageService';
 
 const { Sider } = Layout;
 const { TextArea } = Input;
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 // Fallback mock AI generation responses (when no API key is configured)
 const MOCK_AI_RESPONSES: Record<string, string> = {
@@ -113,11 +119,14 @@ function getMockResponse(prompt: string): string {
 }
 
 function AIPromptPanel() {
+  const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
   const [generatedHtml, setGeneratedHtml] = useState<string | null>(null);
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [showApiConfig, setShowApiConfig] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<'anthropic' | 'openai'>('anthropic');
+  const [configuredProviders, setConfiguredProviders] = useState<ApiKeyConfig[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState<LLMProvider | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [isLoadingProviders, setIsLoadingProviders] = useState(true);
+  const [generationMode, setGenerationMode] = useState<'modify' | 'add'>('modify');
   const {
     isGenerating,
     setGenerating,
@@ -129,58 +138,96 @@ function AIPromptPanel() {
   const { components } = useComponentsStore();
   const { getAIContextPrompt } = useContextStore();
 
-  const llmConfigured = isLLMConfigured();
   const productContext = getAIContextPrompt();
 
-  const handleSaveApiKey = () => {
-    if (apiKeyInput.trim()) {
-      saveLLMConfig({
-        provider: selectedProvider,
-        apiKey: apiKeyInput.trim(),
-      });
-      setApiKeyInput('');
-      setShowApiConfig(false);
-      message.success('API key saved!');
-    }
+  // Fetch configured providers on mount
+  useEffect(() => {
+    const fetchProviders = async () => {
+      setIsLoadingProviders(true);
+      try {
+        const keys = await getApiKeys();
+        setConfiguredProviders(keys);
+
+        // Auto-select active provider or first available
+        const active = keys.find(k => k.isActive);
+        if (active) {
+          setSelectedProvider(active.provider);
+          setSelectedModel(active.model || PROVIDER_INFO[active.provider].defaultModel);
+        } else if (keys.length > 0) {
+          setSelectedProvider(keys[0].provider);
+          setSelectedModel(keys[0].model || PROVIDER_INFO[keys[0].provider].defaultModel);
+        }
+      } catch (error) {
+        console.error('Failed to fetch providers:', error);
+      } finally {
+        setIsLoadingProviders(false);
+      }
+    };
+    fetchProviders();
+  }, []);
+
+  const hasProviders = configuredProviders.length > 0;
+  const currentProviderInfo = selectedProvider ? PROVIDER_INFO[selectedProvider] : null;
+
+  const handleProviderChange = (provider: LLMProvider) => {
+    setSelectedProvider(provider);
+    const config = configuredProviders.find(k => k.provider === provider);
+    setSelectedModel(config?.model || PROVIDER_INFO[provider].defaultModel);
   };
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
+    if (!hasProviders) {
+      message.warning('Please configure an API key in Settings first');
+      return;
+    }
 
     setGenerating(true);
     setGeneratedHtml(null);
 
-    // Check if LLM is configured
-    if (llmConfigured) {
-      // Use real LLM API
-      const response = await generateHtml({
-        prompt,
-        currentHtml,
-        context: productContext || undefined,
-      });
-
-      if (response.success) {
-        setGeneratedHtml(response.html);
-        addGenerationToHistory(prompt, false);
-      } else {
-        message.error(response.error || 'Generation failed');
-        // Fall back to mock
-        setGeneratedHtml(getMockResponse(prompt));
-      }
+    // Build enhanced prompt based on mode
+    let enhancedPrompt = prompt;
+    if (generationMode === 'add') {
+      enhancedPrompt = `Add the following to the page: ${prompt}`;
     } else {
-      // Use mock responses
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      setGeneratedHtml(getMockResponse(prompt));
+      enhancedPrompt = `Modify the page: ${prompt}`;
+    }
+
+    const response = await generateHtml({
+      prompt: enhancedPrompt,
+      currentHtml,
+      context: productContext || undefined,
+      instruction: generationMode,
+    });
+
+    if (response.success) {
+      setGeneratedHtml(response.html);
       addGenerationToHistory(prompt, false);
+      message.success('Generation complete!');
+    } else {
+      message.error(response.error || 'Generation failed');
+      // Fall back to mock for demo
+      if (!hasProviders) {
+        setGeneratedHtml(getMockResponse(prompt));
+        addGenerationToHistory(prompt, false);
+      }
     }
 
     setGenerating(false);
   };
 
-  const handleApply = () => {
+  const handleApplyFullPage = () => {
+    if (!generatedHtml) return;
+    updateHtml(generatedHtml);
+    setGeneratedHtml(null);
+    setPrompt('');
+    message.success('Changes applied to page!');
+  };
+
+  const handleApplyAsComponent = () => {
     if (!generatedHtml) return;
 
-    // Insert generated HTML into current page (at end of body for now)
+    // Insert generated HTML into current page (at end of body)
     const parser = new DOMParser();
     const doc = parser.parseFromString(currentHtml, 'text/html');
 
@@ -194,7 +241,7 @@ function AIPromptPanel() {
     updateHtml(doc.documentElement.outerHTML);
     setGeneratedHtml(null);
     setPrompt('');
-    message.success('Changes applied!');
+    message.success('Component added to page!');
   };
 
   const handleUseSuggestion = (suggestion: string) => {
@@ -203,64 +250,123 @@ function AIPromptPanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* AI Prompt Section */}
-      <div style={{ padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ExperimentOutlined style={{ color: '#764ba2' }} />
-            <Text strong>Vibe Prototype</Text>
+      {/* Header */}
+      <div style={{ padding: 16, borderBottom: '1px solid #f0f0f0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <ThunderboltOutlined style={{ color: '#764ba2', fontSize: 18 }} />
+          <Text strong style={{ fontSize: 16 }}>Vibe Coding</Text>
+        </div>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Describe changes in natural language and AI will modify your screen
+        </Text>
+      </div>
+
+      {/* Provider/Model Selection */}
+      <div style={{ padding: 16, borderBottom: '1px solid #f0f0f0' }}>
+        {isLoadingProviders ? (
+          <div style={{ textAlign: 'center', padding: 12 }}>
+            <Spin size="small" />
+            <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>Loading providers...</Text>
           </div>
-          <Tooltip title={llmConfigured ? 'API Connected' : 'Configure API Key'}>
-            <Button
-              type="text"
-              size="small"
-              icon={<DownOutlined />}
-              onClick={() => setShowApiConfig(!showApiConfig)}
-              style={{ color: llmConfigured ? '#52c41a' : '#faad14' }}
-            >
-              {llmConfigured ? 'Connected' : 'Setup'}
-            </Button>
-          </Tooltip>
+        ) : !hasProviders ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="No API Keys Configured"
+            description={
+              <div>
+                <Text style={{ fontSize: 12 }}>Add your LLM API key to enable AI-powered editing.</Text>
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<SettingOutlined />}
+                  style={{ marginTop: 8 }}
+                  onClick={() => navigate('/settings')}
+                >
+                  Go to Settings
+                </Button>
+              </div>
+            }
+          />
+        ) : (
+          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+            {/* Provider Select */}
+            <div>
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+                <RobotOutlined /> Provider
+              </Text>
+              <Select
+                value={selectedProvider}
+                onChange={handleProviderChange}
+                style={{ width: '100%' }}
+                size="small"
+                options={configuredProviders.map(k => ({
+                  value: k.provider,
+                  label: (
+                    <Space>
+                      <span>{PROVIDER_INFO[k.provider].name}</span>
+                      {k.isActive && <Tag color="green" style={{ margin: 0, fontSize: 10 }}>Active</Tag>}
+                    </Space>
+                  ),
+                }))}
+              />
+            </div>
+
+            {/* Model Select */}
+            {selectedProvider && currentProviderInfo && (
+              <div>
+                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Model</Text>
+                <Select
+                  value={selectedModel}
+                  onChange={setSelectedModel}
+                  style={{ width: '100%' }}
+                  size="small"
+                  showSearch
+                  options={currentProviderInfo.models.map(model => ({
+                    value: model,
+                    label: model,
+                  }))}
+                />
+              </div>
+            )}
+
+            {/* Connection Status */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
+              <Text type="success" style={{ fontSize: 11 }}>
+                Connected to {currentProviderInfo?.name}
+              </Text>
+            </div>
+          </Space>
+        )}
+      </div>
+
+      {/* Prompt Section */}
+      <div style={{ padding: 16, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        {/* Mode Selection */}
+        <div style={{ marginBottom: 12 }}>
+          <Segmented
+            size="small"
+            value={generationMode}
+            onChange={(v) => setGenerationMode(v as 'modify' | 'add')}
+            options={[
+              { value: 'modify', label: 'Modify Page' },
+              { value: 'add', label: 'Add Component' },
+            ]}
+            block
+          />
         </div>
 
-        {/* API Key Configuration */}
-        {showApiConfig && (
-          <div style={{ marginBottom: 12, padding: 12, background: '#f6f6f6', borderRadius: 8 }}>
-            <Text style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
-              {llmConfigured ? 'API key configured. Update below to change.' : 'Enter your API key to enable AI generation.'}
-            </Text>
-            <Segmented
-              size="small"
-              value={selectedProvider}
-              onChange={(v) => setSelectedProvider(v as 'anthropic' | 'openai')}
-              options={[
-                { value: 'anthropic', label: 'Anthropic' },
-                { value: 'openai', label: 'OpenAI' },
-              ]}
-              style={{ marginBottom: 8 }}
-            />
-            <Input.Password
-              size="small"
-              placeholder={selectedProvider === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
-              value={apiKeyInput}
-              onChange={(e) => setApiKeyInput(e.target.value)}
-              style={{ marginBottom: 8 }}
-            />
-            <Button size="small" type="primary" onClick={handleSaveApiKey} disabled={!apiKeyInput.trim()}>
-              Save API Key
-            </Button>
-          </div>
-        )}
-
-        <Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
-          Describe the changes you want to make in natural language.
-          {!llmConfigured && <Text type="warning" style={{ fontSize: 11, display: 'block' }}>(Using mock responses - add API key for real AI)</Text>}
-        </Paragraph>
+        {/* Prompt Input */}
         <TextArea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="E.g., Add a blue call-to-action button that says 'Get Started'..."
-          autoSize={{ minRows: 3, maxRows: 6 }}
+          placeholder={
+            generationMode === 'modify'
+              ? "E.g., Change the header to be dark with white text..."
+              : "E.g., Add a testimonial section with 3 customer reviews..."
+          }
+          autoSize={{ minRows: 4, maxRows: 8 }}
           style={{ marginBottom: 12 }}
           onPressEnter={(e) => {
             if (e.ctrlKey || e.metaKey) {
@@ -268,112 +374,135 @@ function AIPromptPanel() {
             }
           }}
         />
+
+        {/* Generate Button */}
         <Button
           type="primary"
-          icon={isGenerating ? <Spin size="small" /> : <SendOutlined />}
+          icon={isGenerating ? <Spin size="small" /> : <ThunderboltOutlined />}
           onClick={handleGenerate}
-          disabled={!prompt.trim() || isGenerating}
+          disabled={!prompt.trim() || isGenerating || !hasProviders}
           block
+          size="large"
+          style={{ background: hasProviders ? '#764ba2' : undefined }}
         >
-          {isGenerating ? 'Generating...' : 'Generate'}
+          {isGenerating ? 'Generating...' : 'Generate with AI'}
         </Button>
-      </div>
 
-      {/* Suggestions */}
-      <div style={{ padding: '0 16px 16px' }}>
-        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
-          <BulbOutlined /> Suggestions
+        {/* Keyboard shortcut hint */}
+        <Text type="secondary" style={{ fontSize: 10, textAlign: 'center', marginTop: 8 }}>
+          Press Ctrl/⌘ + Enter to generate
         </Text>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {PROMPT_SUGGESTIONS.slice(0, 4).map((suggestion) => (
-            <Tag
-              key={suggestion}
-              style={{ cursor: 'pointer', fontSize: 11 }}
-              onClick={() => handleUseSuggestion(suggestion)}
-            >
-              {suggestion}
-            </Tag>
-          ))}
+
+        {/* Suggestions */}
+        <div style={{ marginTop: 16 }}>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
+            <BulbOutlined /> Quick suggestions
+          </Text>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {PROMPT_SUGGESTIONS.slice(0, 6).map((suggestion) => (
+              <Tag
+                key={suggestion}
+                style={{ cursor: 'pointer', fontSize: 10 }}
+                onClick={() => handleUseSuggestion(suggestion)}
+              >
+                {suggestion}
+              </Tag>
+            ))}
+          </div>
         </div>
       </div>
 
-      <Divider style={{ margin: '0 0 12px 0' }} />
-
       {/* Generated Preview */}
       {generatedHtml && (
-        <div style={{ padding: 16, background: '#f6f6f6', margin: '0 16px', borderRadius: 8 }}>
+        <div style={{ borderTop: '1px solid #f0f0f0', padding: 16, background: '#fafafa' }}>
           <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-            Generated Component
+            <ExperimentOutlined /> Preview
           </Text>
           <div
             style={{
               background: 'white',
-              padding: 16,
+              padding: 12,
               borderRadius: 8,
               marginBottom: 12,
               border: '1px solid #e8e8e8',
+              maxHeight: 200,
+              overflow: 'auto',
             }}
-            dangerouslySetInnerHTML={{ __html: generatedHtml }}
-          />
-          <Space>
-            <Button type="primary" size="small" onClick={handleApply}>
-              Apply to Page
+          >
+            <iframe
+              srcDoc={generatedHtml}
+              style={{ width: '100%', height: 150, border: 'none', pointerEvents: 'none' }}
+              title="Preview"
+            />
+          </div>
+          <Space style={{ width: '100%' }} direction="vertical" size={8}>
+            <Button type="primary" block onClick={handleApplyFullPage}>
+              Apply as Full Page
             </Button>
-            <Button size="small" onClick={() => setGeneratedHtml(null)}>
+            <Button block onClick={handleApplyAsComponent}>
+              Insert as Component
+            </Button>
+            <Button block onClick={() => setGeneratedHtml(null)}>
               Discard
             </Button>
           </Space>
         </div>
       )}
 
-      <Divider style={{ margin: '12px 0' }} />
+      <Divider style={{ margin: '12px 0 0 0' }} />
 
       {/* Component Library Quick Access */}
-      <div style={{ padding: '0 16px', flex: 1, overflow: 'auto' }}>
+      <div style={{ padding: 16, flex: '0 0 auto', maxHeight: 200, overflow: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <AppstoreOutlined />
-          <Text strong style={{ fontSize: 12 }}>Components</Text>
+          <Text strong style={{ fontSize: 12 }}>Component Library</Text>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {components.slice(0, 6).map((comp) => (
-            <Card
-              key={comp.id}
-              size="small"
-              hoverable
-              style={{ cursor: 'grab' }}
-              onClick={() => {
-                const combined = `<style>${comp.css}</style>${comp.html}`;
-                setGeneratedHtml(combined);
-              }}
-            >
-              <Text ellipsis style={{ fontSize: 12 }}>
-                {comp.name}
-              </Text>
-            </Card>
-          ))}
-        </div>
+        {components.length === 0 ? (
+          <Text type="secondary" style={{ fontSize: 11 }}>No components saved yet</Text>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {components.slice(0, 4).map((comp) => (
+              <Card
+                key={comp.id}
+                size="small"
+                hoverable
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  const combined = `<style>${comp.css}</style>${comp.html}`;
+                  setGeneratedHtml(combined);
+                }}
+              >
+                <Text ellipsis style={{ fontSize: 12 }}>
+                  {comp.name}
+                </Text>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Generation History */}
       {generationHistory.length > 0 && (
         <>
-          <Divider style={{ margin: '12px 0' }} />
-          <div style={{ padding: '0 16px 16px' }}>
+          <Divider style={{ margin: 0 }} />
+          <div style={{ padding: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <HistoryOutlined />
-              <Text strong style={{ fontSize: 12 }}>History</Text>
+              <Text strong style={{ fontSize: 12 }}>Recent Prompts</Text>
             </div>
-            <div style={{ maxHeight: 120, overflow: 'auto' }}>
+            <div style={{ maxHeight: 100, overflow: 'auto' }}>
               {generationHistory.slice(-5).reverse().map((item, i) => (
                 <div
                   key={i}
                   style={{
                     fontSize: 11,
-                    padding: '4px 8px',
+                    padding: '6px 8px',
                     background: '#f6f6f6',
                     borderRadius: 4,
                     marginBottom: 4,
+                    cursor: 'pointer',
                   }}
+                  onClick={() => setPrompt(item.prompt)}
                 >
                   <Text ellipsis style={{ display: 'block' }}>
                     {item.prompt}
