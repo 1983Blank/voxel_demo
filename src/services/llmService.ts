@@ -430,7 +430,7 @@ function cleanHtmlResponse(html: string): string {
 }
 
 /**
- * Main generation function - routes to appropriate provider
+ * Main generation function - calls Supabase Edge Function
  */
 export async function generateHtml(
   request: GenerationRequest
@@ -443,11 +443,85 @@ export async function generateHtml(
   console.log('[LLM] 🎯 Current HTML length:', request.currentHtml.length);
   console.log('[LLM] ========================================');
 
-  // Use async version to get the latest config from Supabase
+  // Import supabase client
+  const { supabase, isSupabaseConfigured } = await import('./supabase');
+
+  // Check if Supabase is configured
+  if (!isSupabaseConfigured()) {
+    console.log('[LLM] ⚠️ Supabase not configured, trying direct API call...');
+    // Fall back to direct API call for local development
+    return generateHtmlDirect(request);
+  }
+
+  // Get user session for authentication
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+  if (sessionError || !session) {
+    console.log('[LLM] ❌ No session found:', sessionError);
+    return {
+      html: request.currentHtml,
+      success: false,
+      error: 'Please log in to use AI generation.',
+    };
+  }
+
+  console.log('[LLM] 🔐 User authenticated, calling Edge Function...');
+
+  try {
+    // Call the Edge Function
+    const { data, error } = await supabase.functions.invoke('generate-html', {
+      body: request,
+    });
+
+    console.log('[LLM] 📥 Edge Function response:', { data, error });
+
+    if (error) {
+      console.log('[LLM] ❌ Edge Function error:', error);
+      return {
+        html: request.currentHtml,
+        success: false,
+        error: error.message || 'Edge Function error',
+      };
+    }
+
+    if (!data.success) {
+      console.log('[LLM] ❌ Generation failed:', data.error);
+      return {
+        html: request.currentHtml,
+        success: false,
+        error: data.error || 'Generation failed',
+      };
+    }
+
+    console.log('[LLM] ✅ Generation successful, HTML length:', data.html?.length);
+
+    return {
+      html: data.html,
+      success: true,
+    };
+
+  } catch (error) {
+    console.log('[LLM] ❌ Exception:', error);
+    return {
+      html: request.currentHtml,
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Direct API call fallback for local development without Edge Functions
+ */
+async function generateHtmlDirect(
+  request: GenerationRequest
+): Promise<GenerationResponse> {
+  console.log('[LLM] 🔄 Using direct API call (development mode)...');
+
   const config = await getLLMConfigAsync();
 
   if (!config) {
-    console.log('[LLM] ❌ No LLM config found - aborting generation');
+    console.log('[LLM] ❌ No LLM config found');
     return {
       html: request.currentHtml,
       success: false,
@@ -470,7 +544,6 @@ export async function generateHtml(
       result = await generateWithGoogle(config, request);
       break;
     default:
-      console.log('[LLM] ❌ Unsupported provider:', config.provider);
       result = {
         html: request.currentHtml,
         success: false,
@@ -478,13 +551,7 @@ export async function generateHtml(
       };
   }
 
-  console.log('[LLM] ========================================');
-  console.log('[LLM] 🏁 Generation complete!');
-  console.log('[LLM] 🏁 Success:', result.success);
-  console.log('[LLM] 🏁 Error:', result.error || 'none');
-  console.log('[LLM] 🏁 Result HTML length:', result.html.length);
-  console.log('[LLM] ========================================');
-
+  console.log('[LLM] 🏁 Direct generation complete, success:', result.success);
   return result;
 }
 
