@@ -8,6 +8,7 @@ import {
   Users,
   Login,
   AuthCallback,
+  Admin,
   Screens,
   Components,
   Editor,
@@ -111,6 +112,9 @@ function App() {
                 <Route path="/context" element={<Context />} />
                 <Route path="/collaborate" element={<Collaborate />} />
                 <Route path="/analytics" element={<Analytics />} />
+
+                {/* Admin routes */}
+                <Route path="/admin" element={<Admin />} />
 
                 {/* Legacy routes (can be removed) */}
                 <Route path="/dashboard" element={<Dashboard />} />

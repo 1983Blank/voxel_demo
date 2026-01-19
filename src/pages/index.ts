@@ -2,6 +2,7 @@ export { Dashboard } from './Dashboard';
 export { Users } from './Users';
 export { Login } from './Login';
 export { AuthCallback } from './AuthCallback';
+export { Admin } from './Admin';
 
 // Voxel Pages
 export { Screens } from './Screens';

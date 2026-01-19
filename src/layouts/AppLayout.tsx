@@ -14,13 +14,14 @@ import {
   MenuUnfoldOutlined,
   UserOutlined,
   TeamOutlined,
+  CrownOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
 
-const menuItems: MenuProps['items'] = [
+const getMenuItems = (isAdmin: boolean): MenuProps['items'] => [
   {
     key: 'capture',
     type: 'group',
@@ -67,13 +68,27 @@ const menuItems: MenuProps['items'] = [
       },
     ],
   },
+  // Admin section - only visible to admins
+  ...(isAdmin ? [{
+    key: 'admin',
+    type: 'group' as const,
+    label: 'ADMIN',
+    children: [
+      {
+        key: '/admin',
+        icon: <CrownOutlined />,
+        label: 'User Management',
+      },
+    ],
+  }] : []),
 ];
 
 export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuthStore();
+  const { user, logout, isAdmin } = useAuthStore();
+  const menuItems = getMenuItems(isAdmin());
   const {
     token: { colorBgContainer, borderRadiusLG },
   } = theme.useToken();

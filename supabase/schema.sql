@@ -5,6 +5,90 @@
 create extension if not exists "uuid-ossp";
 
 -- ============================================
+-- USER PROFILES TABLE
+-- Stores user roles and profile info
+-- ============================================
+create table if not exists user_profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text not null,
+  name text,
+  role text not null default 'user' check (role in ('admin', 'user', 'viewer')),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- RLS policies for user_profiles
+alter table user_profiles enable row level security;
+
+-- Users can view their own profile
+create policy "Users can view own profile"
+  on user_profiles for select
+  using (auth.uid() = id);
+
+-- Admins can view all profiles
+create policy "Admins can view all profiles"
+  on user_profiles for select
+  using (
+    exists (
+      select 1 from user_profiles
+      where id = auth.uid() and role = 'admin'
+    )
+  );
+
+-- Admins can insert new profiles (for inviting users)
+create policy "Admins can insert profiles"
+  on user_profiles for insert
+  with check (
+    exists (
+      select 1 from user_profiles
+      where id = auth.uid() and role = 'admin'
+    )
+  );
+
+-- Admins can update any profile
+create policy "Admins can update profiles"
+  on user_profiles for update
+  using (
+    exists (
+      select 1 from user_profiles
+      where id = auth.uid() and role = 'admin'
+    )
+  );
+
+-- Admins can delete profiles (except themselves)
+create policy "Admins can delete profiles"
+  on user_profiles for delete
+  using (
+    auth.uid() != id and
+    exists (
+      select 1 from user_profiles
+      where id = auth.uid() and role = 'admin'
+    )
+  );
+
+-- Function to create user profile on signup
+create or replace function handle_new_user()
+returns trigger as $$
+begin
+  insert into user_profiles (id, email, name, role)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
+    -- First user becomes admin, others are regular users
+    case when (select count(*) from user_profiles) = 0 then 'admin' else 'user' end
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+-- Trigger to auto-create profile on user signup
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function handle_new_user();
+
+-- ============================================
 -- SCREENS TABLE
 -- Stores captured HTML screens
 -- ============================================

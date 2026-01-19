@@ -13,21 +13,42 @@ interface AuthState {
 
   // Actions
   initialize: () => Promise<void>;
-  login: (user: User, token?: string) => void;
   loginWithEmail: (email: string, password: string) => Promise<{ error?: string }>;
-  signUpWithEmail: (email: string, password: string, name: string) => Promise<{ error?: string }>;
-  loginWithProvider: (provider: 'google' | 'github') => Promise<{ error?: string }>;
   logout: () => Promise<void>;
-  setUser: (user: User) => void;
+  refreshProfile: () => Promise<void>;
+
+  // Helpers
+  isAdmin: () => boolean;
+}
+
+// Fetch user profile from database
+async function fetchUserProfile(userId: string): Promise<Partial<User> | null> {
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching user profile:', error);
+    return null;
+  }
+
+  return {
+    name: data.name,
+    role: data.role as 'admin' | 'user' | 'viewer',
+  };
 }
 
 // Convert Supabase user to app User type
-function mapSupabaseUser(supabaseUser: SupabaseUser): User {
+async function mapSupabaseUser(supabaseUser: SupabaseUser): Promise<User> {
+  const profile = await fetchUserProfile(supabaseUser.id);
+
   return {
     id: supabaseUser.id,
     email: supabaseUser.email || '',
-    name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'User',
-    role: 'user',
+    name: profile?.name || supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'User',
+    role: profile?.role || 'user',
     avatar: supabaseUser.user_metadata?.avatar_url,
     createdAt: supabaseUser.created_at,
   };
@@ -44,13 +65,13 @@ export const useAuthStore = create<AuthState>()(
 
       initialize: async () => {
         if (!isSupabaseConfigured()) {
-          // Use mock user for development without Supabase
+          // Use mock admin user for development without Supabase
           set({
             user: {
               id: 'mock-user-1',
-              email: 'demo@voxel.ai',
-              name: 'Demo User',
-              role: 'user',
+              email: 'admin@voxel.ai',
+              name: 'Admin User',
+              role: 'admin',
             },
             isAuthenticated: true,
             isLoading: false,
@@ -62,9 +83,10 @@ export const useAuthStore = create<AuthState>()(
           const { data: { session } } = await supabase.auth.getSession();
 
           if (session?.user) {
+            const user = await mapSupabaseUser(session.user);
             set({
               supabaseUser: session.user,
-              user: mapSupabaseUser(session.user),
+              user,
               isAuthenticated: true,
               accessToken: session.access_token,
               isLoading: false,
@@ -74,11 +96,12 @@ export const useAuthStore = create<AuthState>()(
           }
 
           // Listen for auth changes
-          supabase.auth.onAuthStateChange((event, session) => {
+          supabase.auth.onAuthStateChange(async (event, session) => {
             if (event === 'SIGNED_IN' && session?.user) {
+              const user = await mapSupabaseUser(session.user);
               set({
                 supabaseUser: session.user,
-                user: mapSupabaseUser(session.user),
+                user,
                 isAuthenticated: true,
                 accessToken: session.access_token,
               });
@@ -97,25 +120,17 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      login: (user, token) => {
-        if (token) {
-          localStorage.setItem('accessToken', token);
-        }
-        set({
-          user,
-          isAuthenticated: true,
-          accessToken: token || null,
-        });
-      },
-
       loginWithEmail: async (email, password) => {
         if (!isSupabaseConfigured()) {
           // Mock login for development
-          get().login({
-            id: 'mock-user-1',
-            email,
-            name: email.split('@')[0],
-            role: 'user',
+          set({
+            user: {
+              id: 'mock-user-1',
+              email,
+              name: email.split('@')[0],
+              role: 'admin',
+            },
+            isAuthenticated: true,
           });
           return {};
         }
@@ -123,52 +138,6 @@ export const useAuthStore = create<AuthState>()(
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
-        });
-
-        if (error) {
-          return { error: error.message };
-        }
-
-        return {};
-      },
-
-      signUpWithEmail: async (email, password, name) => {
-        if (!isSupabaseConfigured()) {
-          // Mock signup for development
-          get().login({
-            id: 'mock-user-1',
-            email,
-            name,
-            role: 'user',
-          });
-          return {};
-        }
-
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { name },
-          },
-        });
-
-        if (error) {
-          return { error: error.message };
-        }
-
-        return {};
-      },
-
-      loginWithProvider: async (provider) => {
-        if (!isSupabaseConfigured()) {
-          return { error: 'Supabase not configured' };
-        }
-
-        const { error } = await supabase.auth.signInWithOAuth({
-          provider,
-          options: {
-            redirectTo: `${window.location.origin}/auth/callback`,
-          },
         });
 
         if (error) {
@@ -193,15 +162,23 @@ export const useAuthStore = create<AuthState>()(
         });
       },
 
-      setUser: (user) => {
+      refreshProfile: async () => {
+        const { supabaseUser } = get();
+        if (!supabaseUser) return;
+
+        const user = await mapSupabaseUser(supabaseUser);
         set({ user });
+      },
+
+      isAdmin: () => {
+        const { user } = get();
+        return user?.role === 'admin';
       },
     }),
     {
       name: 'auth-storage',
-      partialize: (state) => ({
-        user: state.user,
-        isAuthenticated: state.isAuthenticated,
+      partialize: () => ({
+        // Don't persist - always fetch fresh from Supabase
       }),
     }
   )
