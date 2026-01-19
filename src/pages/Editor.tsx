@@ -714,18 +714,23 @@ export function Editor() {
     }
   }, [screen?.id, loadScreen, getScreenHtml]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!screenId || !currentHtml) return;
 
-    // Save to screens store with version history
-    saveScreenVersion(screenId, currentHtml, {
-      prompt: lastPrompt || undefined,
-      description: 'Manual edit',
-    });
+    try {
+      // Save to screens store with version history
+      await saveScreenVersion(screenId, currentHtml, {
+        prompt: lastPrompt || undefined,
+        description: 'Manual edit',
+      });
 
-    // Update editor state
-    saveChanges();
-    message.success(`Changes saved! (${versions.length + 1} versions)`);
+      // Update editor state
+      saveChanges();
+      message.success('Changes saved!');
+    } catch (error) {
+      console.error('Save failed:', error);
+      message.error(`Save failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   const handleNavigateToScreen = (targetScreenId: string) => {

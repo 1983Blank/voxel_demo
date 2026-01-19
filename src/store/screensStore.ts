@@ -348,31 +348,37 @@ export const useScreensStore = create<ScreensState>()(
 
         // Save to Supabase (required)
         if (isSupabaseConfigured()) {
-          const { data, error } = await supabase
-            .from('screen_versions')
-            .insert({
-              screen_id: screenId,
-              html,
-              prompt: options.prompt || null,
-              description: options.description || null,
-            })
-            .select()
-            .single();
-
-          if (error) {
-            console.error('Error saving version to Supabase:', error);
-            throw new Error('Failed to save version');
-          }
-
-          if (data) {
-            version = { ...version, id: data.id };
-          }
-
-          // Also update the screen's html
-          await supabase
+          // First update the screen's html
+          const { error: updateError } = await supabase
             .from('screens')
             .update({ html })
             .eq('id', screenId);
+
+          if (updateError) {
+            console.error('Error updating screen HTML:', updateError);
+            throw new Error(`Failed to save: ${updateError.message}`);
+          }
+
+          // Then save version history (optional - may fail if table doesn't exist)
+          try {
+            const { data, error } = await supabase
+              .from('screen_versions')
+              .insert({
+                screen_id: screenId,
+                html,
+                prompt: options.prompt || null,
+                description: options.description || null,
+              })
+              .select()
+              .single();
+
+            if (!error && data) {
+              version = { ...version, id: data.id };
+            }
+          } catch (versionError) {
+            // Version history is optional, don't fail the save
+            console.warn('Could not save version history:', versionError);
+          }
         }
 
         set((state) => ({
