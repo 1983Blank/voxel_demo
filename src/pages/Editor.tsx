@@ -95,16 +95,19 @@ const { Text } = Typography;
 
 // Helper to wrap HTML with permissive CSP for iframe preview
 function wrapWithCSP(html: string): string {
-  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob: https:; style-src * 'unsafe-inline';">`;
+  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob: https: http:; style-src * 'unsafe-inline'; connect-src *;">`;
 
-  if (html.includes('</head>')) {
-    return html.replace('</head>', csp + '</head>');
-  } else if (html.includes('<head>')) {
-    return html.replace('<head>', '<head>' + csp);
-  } else if (html.includes('<html')) {
-    return html.replace(/<html[^>]*>/, '$&<head>' + csp + '</head>');
+  // First, REMOVE any existing CSP meta tags (they override new ones)
+  let result = html.replace(/<meta[^>]*Content-Security-Policy[^>]*>/gi, '');
+
+  if (result.includes('</head>')) {
+    return result.replace('</head>', csp + '</head>');
+  } else if (result.includes('<head>')) {
+    return result.replace('<head>', '<head>' + csp);
+  } else if (result.includes('<html')) {
+    return result.replace(/<html[^>]*>/, '$&<head>' + csp + '</head>');
   }
-  return `<!DOCTYPE html><html><head>${csp}</head><body>${html}</body></html>`;
+  return `<!DOCTYPE html><html><head>${csp}</head><body>${result}</body></html>`;
 }
 
 // Fallback mock AI generation responses (when no API key is configured)
@@ -1224,12 +1227,15 @@ function VisualEditor({
     `;
 
     // Permissive CSP to allow external images and styles
-    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob: https:; style-src * 'unsafe-inline';">`;
+    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob: https: http:; style-src * 'unsafe-inline'; connect-src *;">`;
 
     // Write content to iframe
     iframeDoc.open();
+
+    // First, REMOVE any existing CSP meta tags (they override new ones)
+    let htmlWithStyles = currentHtml.replace(/<meta[^>]*Content-Security-Policy[^>]*>/gi, '');
+
     // Inject CSP and editor styles into head
-    let htmlWithStyles = currentHtml;
     if (htmlWithStyles.includes('</head>')) {
       htmlWithStyles = htmlWithStyles.replace('</head>', cspMeta + editorStyles + '</head>');
     } else if (htmlWithStyles.includes('<head>')) {
