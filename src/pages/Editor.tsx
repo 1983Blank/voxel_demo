@@ -71,6 +71,7 @@ import { useScreensStore } from '@/store/screensStore';
 import { useEditorStore } from '@/store/editorStore';
 import { useComponentsStore } from '@/store/componentsStore';
 import { useContextStore } from '@/store/contextStore';
+import { useAuthStore } from '@/store/authStore';
 import { generateHtml } from '@/services/llmService';
 import {
   getApiKeys,
@@ -189,6 +190,7 @@ interface GenerationVersion {
 
 function AIPromptPanel() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuthStore();
   const [prompt, setPrompt] = useState('');
   const [generatedHtml, setGeneratedHtml] = useState<string | null>(null);
   const [configuredProviders, setConfiguredProviders] = useState<ApiKeyConfig[]>([]);
@@ -228,9 +230,15 @@ function AIPromptPanel() {
   const currentBlobUrl = useBlobUrl(currentHtml);
   const generatedBlobUrl = useBlobUrl(generatedHtml);
 
-  // Fetch configured providers on mount
+  // Fetch configured providers when authenticated
   useEffect(() => {
     const fetchProviders = async () => {
+      // Wait for authentication before fetching API keys
+      if (!isAuthenticated) {
+        console.log('[Editor] ⏳ Waiting for authentication...');
+        return;
+      }
+
       console.log('[Editor] 🔄 Fetching configured providers...');
       setIsLoadingProviders(true);
       try {
@@ -257,7 +265,7 @@ function AIPromptPanel() {
       }
     };
     fetchProviders();
-  }, []);
+  }, [isAuthenticated]);
 
   const hasProviders = configuredProviders.length > 0;
   const currentProviderInfo = selectedProvider ? PROVIDER_INFO[selectedProvider] : null;
