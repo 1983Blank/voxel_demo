@@ -93,6 +93,20 @@ const { Sider } = Layout;
 const { TextArea } = Input;
 const { Text } = Typography;
 
+// Helper to wrap HTML with permissive CSP for iframe preview
+function wrapWithCSP(html: string): string {
+  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob: https:; style-src * 'unsafe-inline';">`;
+
+  if (html.includes('</head>')) {
+    return html.replace('</head>', csp + '</head>');
+  } else if (html.includes('<head>')) {
+    return html.replace('<head>', '<head>' + csp);
+  } else if (html.includes('<html')) {
+    return html.replace(/<html[^>]*>/, '$&<head>' + csp + '</head>');
+  }
+  return `<!DOCTYPE html><html><head>${csp}</head><body>${html}</body></html>`;
+}
+
 // Fallback mock AI generation responses (when no API key is configured)
 const MOCK_AI_RESPONSES: Record<string, string> = {
   button: `<button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">New Button</button>`,
@@ -768,7 +782,7 @@ function AIPromptPanel() {
                     <Text type="secondary" style={{ fontSize: 10 }}>Original</Text>
                   </div>
                   <iframe
-                    srcDoc={currentHtml}
+                    srcDoc={wrapWithCSP(currentHtml)}
                     style={{ flex: 1, border: 'none', width: '100%' }}
                     title="Original"
                   />
@@ -778,7 +792,7 @@ function AIPromptPanel() {
                     <Text type="secondary" style={{ fontSize: 10 }}>Generated</Text>
                   </div>
                   <iframe
-                    srcDoc={generatedHtml}
+                    srcDoc={wrapWithCSP(generatedHtml)}
                     style={{ flex: 1, border: 'none', width: '100%' }}
                     title="Generated"
                   />
@@ -787,7 +801,7 @@ function AIPromptPanel() {
             ) : (
               // Single preview
               <iframe
-                srcDoc={generatedHtml}
+                srcDoc={wrapWithCSP(generatedHtml)}
                 style={{ flex: 1, border: 'none', width: '100%' }}
                 title="Preview"
               />
@@ -1209,9 +1223,22 @@ function VisualEditor({
       </style>
     `;
 
+    // Permissive CSP to allow external images and styles
+    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob: https:; style-src * 'unsafe-inline';">`;
+
     // Write content to iframe
     iframeDoc.open();
-    iframeDoc.write(currentHtml.replace('</head>', editorStyles + '</head>'));
+    // Inject CSP and editor styles into head
+    let htmlWithStyles = currentHtml;
+    if (htmlWithStyles.includes('</head>')) {
+      htmlWithStyles = htmlWithStyles.replace('</head>', cspMeta + editorStyles + '</head>');
+    } else if (htmlWithStyles.includes('<head>')) {
+      htmlWithStyles = htmlWithStyles.replace('<head>', '<head>' + cspMeta + editorStyles);
+    } else {
+      // No head tag, wrap content
+      htmlWithStyles = `<!DOCTYPE html><html><head>${cspMeta}${editorStyles}</head><body>${htmlWithStyles}</body></html>`;
+    }
+    iframeDoc.write(htmlWithStyles);
     iframeDoc.close();
 
     // Get element path for display

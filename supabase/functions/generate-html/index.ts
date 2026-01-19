@@ -149,6 +149,7 @@ Deno.serve(async (req) => {
   console.log('[Edge] ======== REQUEST RECEIVED ========')
   console.log('[Edge] Method:', req.method)
   console.log('[Edge] URL:', req.url)
+  console.log('[Edge] Headers:', Object.fromEntries(req.headers.entries()))
 
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {

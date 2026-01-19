@@ -483,6 +483,8 @@ export async function generateHtml(
   }
 
   console.log('[LLM] ✅ Step 3: User authenticated');
+  console.log('[LLM] 📦 Step 3b: Access token present:', !!session.access_token);
+  console.log('[LLM] 📦 Step 3b: Token starts with:', session.access_token?.substring(0, 20) + '...');
   console.log('[LLM] 📦 Step 4: Calling Edge Function...');
 
   try {
@@ -490,8 +492,16 @@ export async function generateHtml(
     console.log('[LLM] 📤 Invoking Edge Function generate-html...');
     console.log('[LLM] 📤 Supabase URL:', import.meta.env.VITE_SUPABASE_URL);
 
+    // Explicitly pass the Authorization and apikey headers
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    console.log('[LLM] 📤 Using anon key:', supabaseAnonKey ? supabaseAnonKey.substring(0, 20) + '...' : 'MISSING');
+
     const { data, error } = await supabase.functions.invoke('generate-html', {
       body: request,
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: supabaseAnonKey,
+      },
     });
 
     console.log('[LLM] 📥 Edge Function response:', { data, error });
