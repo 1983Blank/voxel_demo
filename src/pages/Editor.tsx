@@ -15,6 +15,12 @@ import {
   Spin,
   Segmented,
   Modal,
+  Upload,
+  ColorPicker,
+  InputNumber,
+  Slider,
+  Collapse,
+  Tabs,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -37,6 +43,18 @@ import {
   DeleteOutlined,
   ExperimentOutlined,
   DownOutlined,
+  UploadOutlined,
+  PictureOutlined,
+  FontSizeOutlined,
+  BgColorsOutlined,
+  LinkOutlined,
+  AlignLeftOutlined,
+  AlignCenterOutlined,
+  AlignRightOutlined,
+  BoldOutlined,
+  ItalicOutlined,
+  ColumnWidthOutlined,
+  ColumnHeightOutlined,
 } from '@ant-design/icons';
 import { useScreensStore } from '@/store/screensStore';
 import { useEditorStore } from '@/store/editorStore';
@@ -47,6 +65,7 @@ import {
   isLLMConfigured,
   saveLLMConfig,
 } from '@/services/llmService';
+import { uploadImage, getUserImages } from '@/services/storageService';
 
 const { Sider } = Layout;
 const { TextArea } = Input;
@@ -377,11 +396,128 @@ interface ToolbarState {
   isImage: boolean;
 }
 
-function VisualEditor() {
+// Element properties for the property panel
+interface ElementProperties {
+  tagName: string;
+  // Text properties
+  text?: string;
+  fontSize?: string;
+  fontWeight?: string;
+  fontStyle?: string;
+  color?: string;
+  textAlign?: string;
+  // Image properties
+  src?: string;
+  alt?: string;
+  width?: string;
+  height?: string;
+  // Link properties
+  href?: string;
+  target?: string;
+  // Layout properties
+  backgroundColor?: string;
+  padding?: string;
+  margin?: string;
+  borderRadius?: string;
+  // Raw styles
+  styles: Record<string, string>;
+}
+
+// Parse element to extract properties
+function getElementProperties(element: HTMLElement): ElementProperties {
+  const computedStyle = element.ownerDocument?.defaultView?.getComputedStyle(element);
+  const styles: Record<string, string> = {};
+
+  if (computedStyle) {
+    styles.fontSize = computedStyle.fontSize;
+    styles.fontWeight = computedStyle.fontWeight;
+    styles.fontStyle = computedStyle.fontStyle;
+    styles.color = computedStyle.color;
+    styles.textAlign = computedStyle.textAlign;
+    styles.backgroundColor = computedStyle.backgroundColor;
+    styles.padding = computedStyle.padding;
+    styles.margin = computedStyle.margin;
+    styles.borderRadius = computedStyle.borderRadius;
+    styles.width = computedStyle.width;
+    styles.height = computedStyle.height;
+  }
+
+  const props: ElementProperties = {
+    tagName: element.tagName.toLowerCase(),
+    styles,
+  };
+
+  // Text content (only for text elements)
+  if (['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label', 'li'].includes(props.tagName)) {
+    props.text = element.textContent || '';
+    props.fontSize = styles.fontSize;
+    props.fontWeight = styles.fontWeight;
+    props.fontStyle = styles.fontStyle;
+    props.color = styles.color;
+    props.textAlign = styles.textAlign;
+  }
+
+  // Image properties
+  if (props.tagName === 'img') {
+    const img = element as HTMLImageElement;
+    props.src = img.src;
+    props.alt = img.alt;
+    props.width = img.style.width || img.getAttribute('width') || '';
+    props.height = img.style.height || img.getAttribute('height') || '';
+  }
+
+  // Link properties
+  if (props.tagName === 'a') {
+    const link = element as HTMLAnchorElement;
+    props.href = link.href;
+    props.target = link.target;
+  }
+
+  // Background and layout
+  props.backgroundColor = styles.backgroundColor;
+  props.padding = styles.padding;
+  props.margin = styles.margin;
+  props.borderRadius = styles.borderRadius;
+
+  return props;
+}
+
+// Convert RGB to hex
+function rgbToHex(rgb: string): string {
+  if (rgb.startsWith('#')) return rgb;
+  if (rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return 'transparent';
+
+  const match = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!match) return rgb;
+
+  const r = parseInt(match[1]);
+  const g = parseInt(match[2]);
+  const b = parseInt(match[3]);
+
+  return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+interface VisualEditorProps {
+  onElementSelect: (props: ElementProperties | null, element: HTMLElement | null) => void;
+  imageModalOpen: boolean;
+  imageModalSrc: string;
+  onImageModalClose: () => void;
+  onImageModalOpen: (src: string) => void;
+  onImageReplace: (newSrc: string) => void;
+}
+
+function VisualEditor({
+  onElementSelect,
+  imageModalOpen,
+  imageModalSrc,
+  onImageModalClose,
+  onImageModalOpen,
+  onImageReplace,
+}: VisualEditorProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const selectedElementRef = useRef<Element | null>(null);
+  const selectedElementRef = useRef<HTMLElement | null>(null);
   const {
     currentHtml,
     updateHtml,
@@ -400,15 +536,51 @@ function VisualEditor() {
     isImage: false,
   });
 
-  // Image modal state
-  const [imageModal, setImageModal] = useState<{
-    visible: boolean;
-    currentSrc: string;
-  }>({
-    visible: false,
-    currentSrc: '',
-  });
+  // Image modal local state
   const [newImageUrl, setNewImageUrl] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const [userImages, setUserImages] = useState<string[]>([]);
+  const [imageTab, setImageTab] = useState<string>('upload');
+
+  // Reset URL when modal opens with new src
+  useEffect(() => {
+    if (imageModalOpen) {
+      setNewImageUrl('');
+      setImageTab('upload');
+      getUserImages().then(setUserImages);
+    }
+  }, [imageModalOpen, imageModalSrc]);
+
+  // Handle file upload
+  const handleImageUpload = async (file: File) => {
+    setIsUploading(true);
+    try {
+      const result = await uploadImage(file);
+      if (result.success && result.url) {
+        setNewImageUrl(result.url);
+        message.success('Image uploaded!');
+        // Refresh user images
+        getUserImages().then(setUserImages);
+      } else {
+        message.error(result.error || 'Upload failed');
+      }
+    } catch (error) {
+      message.error('Upload failed');
+    } finally {
+      setIsUploading(false);
+    }
+    return false; // Prevent default upload behavior
+  };
+
+  // Handle replace image
+  const handleReplaceImageConfirm = () => {
+    if (newImageUrl.trim()) {
+      onImageReplace(newImageUrl.trim());
+      setNewImageUrl('');
+      onImageModalClose();
+      message.success('Image replaced!');
+    }
+  };
 
   // Hide toolbar
   const hideToolbar = useCallback(() => {
@@ -427,27 +599,6 @@ function VisualEditor() {
     }, 800);
   }, [updateHtml]);
 
-  // Handle image replacement
-  const handleReplaceImage = () => {
-    const iframe = iframeRef.current;
-    if (!iframe || !newImageUrl.trim()) return;
-
-    const iframeDoc = iframe.contentDocument;
-    if (!iframeDoc) return;
-
-    const selected = iframeDoc.querySelector('[data-voxel-selected="true"]') as HTMLImageElement;
-    if (selected && selected.tagName === 'IMG') {
-      selected.src = newImageUrl.trim();
-
-      const newHtml = iframeDoc.documentElement.outerHTML;
-      const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
-      updateHtml(cleanHtml);
-
-      setImageModal({ visible: false, currentSrc: '' });
-      setNewImageUrl('');
-      message.success('Image replaced!');
-    }
-  };
 
   // Handle delete element
   const handleDeleteElement = () => {
@@ -575,10 +726,11 @@ function VisualEditor() {
       e.preventDefault();
       e.stopPropagation();
 
-      const target = e.target as Element;
+      const target = e.target as HTMLElement;
       if (!target || target === iframeDoc.body || target === iframeDoc.documentElement) {
         setSelectedElement(null, null);
         selectedElementRef.current = null;
+        onElementSelect(null, null);
         hideToolbar();
         return;
       }
@@ -594,6 +746,11 @@ function VisualEditor() {
 
       const path = getPath(target);
       setSelectedElement(path, target.outerHTML);
+
+      // Get element properties for property panel
+      const props = getElementProperties(target);
+      onElementSelect(props, target);
+
       hideToolbar();
     };
 
@@ -618,10 +775,7 @@ function VisualEditor() {
 
       // If it's an image, also open the image modal
       if (isImage) {
-        setImageModal({
-          visible: true,
-          currentSrc: (target as HTMLImageElement).src,
-        });
+        onImageModalOpen((target as HTMLImageElement).src);
       }
 
       setToolbar({
@@ -754,8 +908,13 @@ function VisualEditor() {
               <Button
                 type="text"
                 size="small"
-                icon={<AppstoreOutlined />}
-                onClick={() => setImageModal({ visible: true, currentSrc: '' })}
+                icon={<PictureOutlined />}
+                onClick={() => {
+                  const selected = selectedElementRef.current as HTMLImageElement;
+                  if (selected) {
+                    onImageModalOpen(selected.src || '');
+                  }
+                }}
               />
             </Tooltip>
           )}
@@ -784,53 +943,138 @@ function VisualEditor() {
       {/* Image Replace Modal */}
       <Modal
         title="Replace Image"
-        open={imageModal.visible}
+        open={imageModalOpen}
         onCancel={() => {
-          setImageModal({ visible: false, currentSrc: '' });
           setNewImageUrl('');
+          setImageTab('upload');
+          onImageModalClose();
         }}
-        onOk={handleReplaceImage}
-        okText="Replace"
-        okButtonProps={{ disabled: !newImageUrl.trim() }}
+        onOk={handleReplaceImageConfirm}
+        okText="Replace Image"
+        okButtonProps={{ disabled: !newImageUrl.trim(), loading: isUploading }}
+        width={560}
       >
-        {imageModal.currentSrc && (
-          <div style={{ marginBottom: 16 }}>
+        {imageModalSrc && (
+          <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 8 }}>
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
               Current image:
             </Text>
             <img
-              src={imageModal.currentSrc}
+              src={imageModalSrc}
               alt="Current"
-              style={{ maxWidth: '100%', maxHeight: 150, borderRadius: 8, border: '1px solid #eee' }}
+              style={{ maxWidth: '100%', maxHeight: 120, borderRadius: 8, border: '1px solid #eee' }}
             />
           </div>
         )}
-        <div>
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-            Enter new image URL:
-          </Text>
-          <Input
-            placeholder="https://example.com/image.jpg"
-            value={newImageUrl}
-            onChange={(e) => setNewImageUrl(e.target.value)}
-            onPressEnter={handleReplaceImage}
-          />
-          {newImageUrl && (
-            <div style={{ marginTop: 12 }}>
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-                Preview:
-              </Text>
-              <img
-                src={newImageUrl}
-                alt="Preview"
-                style={{ maxWidth: '100%', maxHeight: 150, borderRadius: 8, border: '1px solid #eee' }}
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            </div>
-          )}
-        </div>
+
+        <Tabs
+          activeKey={imageTab}
+          onChange={setImageTab}
+          items={[
+            {
+              key: 'upload',
+              label: (
+                <span>
+                  <UploadOutlined /> Upload
+                </span>
+              ),
+              children: (
+                <div>
+                  <Upload.Dragger
+                    accept="image/*"
+                    showUploadList={false}
+                    beforeUpload={handleImageUpload}
+                    disabled={isUploading}
+                  >
+                    <p className="ant-upload-drag-icon">
+                      <PictureOutlined style={{ fontSize: 48, color: '#999' }} />
+                    </p>
+                    <p className="ant-upload-text">Click or drag image to upload</p>
+                    <p className="ant-upload-hint">Supports JPG, PNG, GIF, WebP</p>
+                  </Upload.Dragger>
+                  {isUploading && (
+                    <div style={{ textAlign: 'center', marginTop: 12 }}>
+                      <Spin /> <Text type="secondary">Uploading...</Text>
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'url',
+              label: (
+                <span>
+                  <LinkOutlined /> URL
+                </span>
+              ),
+              children: (
+                <div>
+                  <Input
+                    placeholder="https://example.com/image.jpg"
+                    value={newImageUrl}
+                    onChange={(e) => setNewImageUrl(e.target.value)}
+                    onPressEnter={handleReplaceImageConfirm}
+                    prefix={<LinkOutlined />}
+                    size="large"
+                  />
+                </div>
+              ),
+            },
+            {
+              key: 'gallery',
+              label: (
+                <span>
+                  <AppstoreOutlined /> My Images
+                </span>
+              ),
+              children: (
+                <div style={{ maxHeight: 200, overflow: 'auto' }}>
+                  {userImages.length === 0 ? (
+                    <Empty description="No uploaded images yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                      {userImages.map((url, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => setNewImageUrl(url)}
+                          style={{
+                            cursor: 'pointer',
+                            border: newImageUrl === url ? '2px solid #764ba2' : '2px solid transparent',
+                            borderRadius: 8,
+                            overflow: 'hidden',
+                            aspectRatio: '1',
+                          }}
+                        >
+                          <img
+                            src={url}
+                            alt={`Uploaded ${idx}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+          ]}
+        />
+
+        {newImageUrl && (
+          <div style={{ marginTop: 16, padding: 12, background: '#f5f5f5', borderRadius: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              New image preview:
+            </Text>
+            <img
+              src={newImageUrl}
+              alt="Preview"
+              style={{ maxWidth: '100%', maxHeight: 120, borderRadius: 8, border: '1px solid #eee' }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
       </Modal>
 
       <div
@@ -858,50 +1102,338 @@ function VisualEditor() {
   );
 }
 
-function ElementInspector() {
+interface PropertyPanelProps {
+  elementProps: ElementProperties | null;
+  element: HTMLElement | null;
+  onUpdateStyle: (property: string, value: string) => void;
+  onUpdateAttribute: (attribute: string, value: string) => void;
+  onDelete: () => void;
+  onDuplicate: () => void;
+  onOpenImageModal: () => void;
+}
+
+function PropertyPanel({
+  elementProps,
+  element,
+  onUpdateStyle,
+  onUpdateAttribute,
+  onDelete,
+  onDuplicate,
+  onOpenImageModal,
+}: PropertyPanelProps) {
   const { selectedElementHtml } = useEditorStore();
 
-  if (!selectedElementHtml) {
+  if (!elementProps || !element) {
     return (
       <div style={{ padding: 16, textAlign: 'center' }}>
-        <Text type="secondary">Select an element to inspect</Text>
+        <PictureOutlined style={{ fontSize: 48, color: '#d9d9d9', marginBottom: 16 }} />
+        <Text type="secondary" style={{ display: 'block' }}>
+          Select an element to edit its properties
+        </Text>
+        <Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 8 }}>
+          Click to select, double-click for quick actions
+        </Text>
       </div>
     );
   }
 
+  const isTextElement = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label', 'li', 'div'].includes(elementProps.tagName);
+  const isImage = elementProps.tagName === 'img';
+  const isLink = elementProps.tagName === 'a';
+
   return (
-    <div style={{ padding: 16 }}>
-      <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-        Selected Element
-      </Text>
-      <div
-        style={{
-          background: '#1e1e1e',
-          padding: 12,
-          borderRadius: 8,
-          overflow: 'auto',
-          maxHeight: 200,
-        }}
-      >
-        <pre style={{ margin: 0, fontSize: 11, color: '#d4d4d4' }}>
-          {selectedElementHtml}
-        </pre>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Element Header */}
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Tag color="purple">{elementProps.tagName.toUpperCase()}</Tag>
+          <Space size={4}>
+            <Tooltip title="Duplicate">
+              <Button type="text" size="small" icon={<CopyOutlined />} onClick={onDuplicate} />
+            </Tooltip>
+            <Tooltip title="Delete">
+              <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={onDelete} />
+            </Tooltip>
+          </Space>
+        </Space>
       </div>
-      <Space style={{ marginTop: 12 }} wrap>
-        <Button
+
+      {/* Properties */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+        <Collapse
+          defaultActiveKey={['content', 'typography', 'image', 'layout']}
+          ghost
           size="small"
-          icon={<CopyOutlined />}
-          onClick={() => {
-            navigator.clipboard.writeText(selectedElementHtml);
-            message.success('Copied!');
-          }}
-        >
-          Copy
-        </Button>
-        <Button size="small" icon={<DeleteOutlined />} danger>
-          Delete
-        </Button>
-      </Space>
+          items={[
+            // Content Section (for text elements)
+            ...(isTextElement ? [{
+              key: 'content',
+              label: <Text strong style={{ fontSize: 12 }}>Content</Text>,
+              children: (
+                <div style={{ padding: '0 16px' }}>
+                  {isLink && (
+                    <div style={{ marginBottom: 12 }}>
+                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Link URL</Text>
+                      <Input
+                        size="small"
+                        prefix={<LinkOutlined />}
+                        defaultValue={elementProps.href}
+                        onBlur={(e) => onUpdateAttribute('href', e.target.value)}
+                        placeholder="https://..."
+                      />
+                    </div>
+                  )}
+                </div>
+              ),
+            }] : []),
+
+            // Typography Section
+            ...(isTextElement ? [{
+              key: 'typography',
+              label: <Text strong style={{ fontSize: 12 }}><FontSizeOutlined /> Typography</Text>,
+              children: (
+                <div style={{ padding: '0 16px' }}>
+                  {/* Font Size */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Font Size</Text>
+                    <InputNumber
+                      size="small"
+                      min={8}
+                      max={128}
+                      defaultValue={parseInt(elementProps.fontSize || '16')}
+                      onChange={(value) => onUpdateStyle('fontSize', `${value}px`)}
+                      addonAfter="px"
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+
+                  {/* Font Weight & Style */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Style</Text>
+                    <Space>
+                      <Tooltip title="Bold">
+                        <Button
+                          size="small"
+                          type={elementProps.fontWeight === 'bold' || parseInt(elementProps.fontWeight || '400') >= 700 ? 'primary' : 'default'}
+                          icon={<BoldOutlined />}
+                          onClick={() => onUpdateStyle('fontWeight', elementProps.fontWeight === 'bold' || parseInt(elementProps.fontWeight || '400') >= 700 ? 'normal' : 'bold')}
+                        />
+                      </Tooltip>
+                      <Tooltip title="Italic">
+                        <Button
+                          size="small"
+                          type={elementProps.fontStyle === 'italic' ? 'primary' : 'default'}
+                          icon={<ItalicOutlined />}
+                          onClick={() => onUpdateStyle('fontStyle', elementProps.fontStyle === 'italic' ? 'normal' : 'italic')}
+                        />
+                      </Tooltip>
+                    </Space>
+                  </div>
+
+                  {/* Text Align */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Alignment</Text>
+                    <Segmented
+                      size="small"
+                      value={elementProps.textAlign || 'left'}
+                      onChange={(value) => onUpdateStyle('textAlign', value as string)}
+                      options={[
+                        { value: 'left', icon: <AlignLeftOutlined /> },
+                        { value: 'center', icon: <AlignCenterOutlined /> },
+                        { value: 'right', icon: <AlignRightOutlined /> },
+                      ]}
+                    />
+                  </div>
+
+                  {/* Text Color */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Text Color</Text>
+                    <ColorPicker
+                      size="small"
+                      defaultValue={rgbToHex(elementProps.color || '#000000')}
+                      onChange={(color) => onUpdateStyle('color', color.toHexString())}
+                      showText
+                    />
+                  </div>
+                </div>
+              ),
+            }] : []),
+
+            // Image Section
+            ...(isImage ? [{
+              key: 'image',
+              label: <Text strong style={{ fontSize: 12 }}><PictureOutlined /> Image</Text>,
+              children: (
+                <div style={{ padding: '0 16px' }}>
+                  {/* Current Image Preview */}
+                  <div style={{ marginBottom: 12 }}>
+                    <img
+                      src={elementProps.src}
+                      alt={elementProps.alt}
+                      style={{ width: '100%', borderRadius: 8, border: '1px solid #eee' }}
+                    />
+                  </div>
+
+                  {/* Replace Image Button */}
+                  <Button
+                    type="primary"
+                    icon={<UploadOutlined />}
+                    onClick={onOpenImageModal}
+                    block
+                    style={{ marginBottom: 12 }}
+                  >
+                    Replace Image
+                  </Button>
+
+                  {/* Alt Text */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Alt Text</Text>
+                    <Input
+                      size="small"
+                      defaultValue={elementProps.alt}
+                      onBlur={(e) => onUpdateAttribute('alt', e.target.value)}
+                      placeholder="Describe the image"
+                    />
+                  </div>
+
+                  {/* Dimensions */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Dimensions</Text>
+                    <Space>
+                      <InputNumber
+                        size="small"
+                        placeholder="Width"
+                        prefix={<ColumnWidthOutlined />}
+                        defaultValue={parseInt(elementProps.width || '0') || undefined}
+                        onChange={(value) => onUpdateStyle('width', value ? `${value}px` : 'auto')}
+                        style={{ width: 100 }}
+                      />
+                      <InputNumber
+                        size="small"
+                        placeholder="Height"
+                        prefix={<ColumnHeightOutlined />}
+                        defaultValue={parseInt(elementProps.height || '0') || undefined}
+                        onChange={(value) => onUpdateStyle('height', value ? `${value}px` : 'auto')}
+                        style={{ width: 100 }}
+                      />
+                    </Space>
+                  </div>
+
+                  {/* Border Radius */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Border Radius</Text>
+                    <Slider
+                      min={0}
+                      max={50}
+                      defaultValue={parseInt(elementProps.borderRadius || '0')}
+                      onChange={(value) => onUpdateStyle('borderRadius', `${value}px`)}
+                    />
+                  </div>
+                </div>
+              ),
+            }] : []),
+
+            // Layout Section
+            {
+              key: 'layout',
+              label: <Text strong style={{ fontSize: 12 }}><BgColorsOutlined /> Background & Spacing</Text>,
+              children: (
+                <div style={{ padding: '0 16px' }}>
+                  {/* Background Color */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Background</Text>
+                    <ColorPicker
+                      size="small"
+                      defaultValue={rgbToHex(elementProps.backgroundColor || 'transparent')}
+                      onChange={(color) => onUpdateStyle('backgroundColor', color.toHexString())}
+                      showText
+                      allowClear
+                    />
+                  </div>
+
+                  {/* Padding */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Padding</Text>
+                    <InputNumber
+                      size="small"
+                      min={0}
+                      max={100}
+                      defaultValue={parseInt(elementProps.padding || '0')}
+                      onChange={(value) => onUpdateStyle('padding', `${value}px`)}
+                      addonAfter="px"
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+
+                  {/* Margin */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Margin</Text>
+                    <InputNumber
+                      size="small"
+                      min={0}
+                      max={100}
+                      defaultValue={parseInt(elementProps.margin || '0')}
+                      onChange={(value) => onUpdateStyle('margin', `${value}px`)}
+                      addonAfter="px"
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+
+                  {/* Border Radius */}
+                  {!isImage && (
+                    <div style={{ marginBottom: 12 }}>
+                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Border Radius</Text>
+                      <InputNumber
+                        size="small"
+                        min={0}
+                        max={100}
+                        defaultValue={parseInt(elementProps.borderRadius || '0')}
+                        onChange={(value) => onUpdateStyle('borderRadius', `${value}px`)}
+                        addonAfter="px"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+
+            // Raw HTML Section
+            {
+              key: 'html',
+              label: <Text strong style={{ fontSize: 12 }}>HTML</Text>,
+              children: (
+                <div style={{ padding: '0 16px' }}>
+                  <div
+                    style={{
+                      background: '#1e1e1e',
+                      padding: 12,
+                      borderRadius: 8,
+                      overflow: 'auto',
+                      maxHeight: 150,
+                    }}
+                  >
+                    <pre style={{ margin: 0, fontSize: 10, color: '#d4d4d4', whiteSpace: 'pre-wrap' }}>
+                      {selectedElementHtml}
+                    </pre>
+                  </div>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    style={{ marginTop: 8 }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedElementHtml || '');
+                      message.success('Copied!');
+                    }}
+                  >
+                    Copy HTML
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+        />
+      </div>
     </div>
   );
 }
@@ -936,9 +1468,130 @@ export function Editor() {
     screenName,
     currentHtml,
     lastPrompt,
+    updateHtml,
   } = useEditorStore();
 
   const [loading, setLoading] = useState(true);
+  const [selectedElementProps, setSelectedElementProps] = useState<ElementProperties | null>(null);
+  const [selectedElement, setSelectedElementRef] = useState<HTMLElement | null>(null);
+
+  // Image modal state (lifted to Editor for PropertyPanel access)
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [imageModalSrc, setImageModalSrc] = useState('');
+
+  // Handle element selection from VisualEditor
+  const handleElementSelect = useCallback((props: ElementProperties | null, element: HTMLElement | null) => {
+    setSelectedElementProps(props);
+    setSelectedElementRef(element);
+  }, []);
+
+  // Update element style
+  const handleUpdateStyle = useCallback((property: string, value: string) => {
+    if (!selectedElement) return;
+
+    selectedElement.style[property as any] = value;
+
+    // Update the HTML in store
+    const iframeDoc = selectedElement.ownerDocument;
+    if (iframeDoc) {
+      const newHtml = iframeDoc.documentElement.outerHTML;
+      const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
+      updateHtml(cleanHtml);
+
+      // Update local state
+      setSelectedElementProps(getElementProperties(selectedElement));
+    }
+  }, [selectedElement, updateHtml]);
+
+  // Update element attribute
+  const handleUpdateAttribute = useCallback((attribute: string, value: string) => {
+    if (!selectedElement) return;
+
+    selectedElement.setAttribute(attribute, value);
+
+    // Update the HTML in store
+    const iframeDoc = selectedElement.ownerDocument;
+    if (iframeDoc) {
+      const newHtml = iframeDoc.documentElement.outerHTML;
+      const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
+      updateHtml(cleanHtml);
+
+      // Update local state
+      setSelectedElementProps(getElementProperties(selectedElement));
+    }
+  }, [selectedElement, updateHtml]);
+
+  // Delete selected element
+  const handleDeleteElement = useCallback(() => {
+    if (!selectedElement) return;
+
+    const iframeDoc = selectedElement.ownerDocument;
+    selectedElement.remove();
+
+    if (iframeDoc) {
+      const newHtml = iframeDoc.documentElement.outerHTML;
+      const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
+      updateHtml(cleanHtml);
+    }
+
+    setSelectedElementProps(null);
+    setSelectedElementRef(null);
+    message.success('Element deleted');
+  }, [selectedElement, updateHtml]);
+
+  // Duplicate selected element
+  const handleDuplicateElement = useCallback(() => {
+    if (!selectedElement || !selectedElement.parentElement) return;
+
+    const clone = selectedElement.cloneNode(true) as HTMLElement;
+    clone.removeAttribute('data-voxel-selected');
+    selectedElement.parentElement.insertBefore(clone, selectedElement.nextSibling);
+
+    const iframeDoc = selectedElement.ownerDocument;
+    if (iframeDoc) {
+      const newHtml = iframeDoc.documentElement.outerHTML;
+      const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
+      updateHtml(cleanHtml);
+    }
+
+    message.success('Element duplicated');
+  }, [selectedElement, updateHtml]);
+
+  // Image modal handlers
+  const handleImageModalOpen = useCallback((src: string) => {
+    setImageModalSrc(src);
+    setImageModalOpen(true);
+  }, []);
+
+  const handleImageModalClose = useCallback(() => {
+    setImageModalOpen(false);
+    setImageModalSrc('');
+  }, []);
+
+  const handleImageReplace = useCallback((newSrc: string) => {
+    if (!selectedElement || selectedElement.tagName !== 'IMG') return;
+
+    (selectedElement as HTMLImageElement).src = newSrc;
+
+    const iframeDoc = selectedElement.ownerDocument;
+    if (iframeDoc) {
+      const newHtml = iframeDoc.documentElement.outerHTML;
+      const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
+      updateHtml(cleanHtml);
+
+      // Update local state
+      setSelectedElementProps(getElementProperties(selectedElement));
+    }
+  }, [selectedElement, updateHtml]);
+
+  // Open image modal from property panel
+  const handleOpenImageModal = useCallback(() => {
+    if (selectedElement && selectedElement.tagName === 'IMG') {
+      handleImageModalOpen((selectedElement as HTMLImageElement).src);
+    } else {
+      handleImageModalOpen('');
+    }
+  }, [selectedElement, handleImageModalOpen]);
 
   // Initialize screens store
   useEffect(() => {
@@ -1170,16 +1823,31 @@ export function Editor() {
             <Spin size="large" />
           </div>
         ) : (
-          <VisualEditor />
+          <VisualEditor
+            onElementSelect={handleElementSelect}
+            imageModalOpen={imageModalOpen}
+            imageModalSrc={imageModalSrc}
+            onImageModalClose={handleImageModalClose}
+            onImageModalOpen={handleImageModalOpen}
+            onImageReplace={handleImageReplace}
+          />
         )}
 
-        {/* Right Panel - Element Inspector */}
+        {/* Right Panel - Property Editor */}
         <Sider
-          width={280}
+          width={300}
           theme="light"
-          style={{ borderLeft: '1px solid #f0f0f0', overflow: 'auto' }}
+          style={{ borderLeft: '1px solid #f0f0f0', overflow: 'hidden' }}
         >
-          <ElementInspector />
+          <PropertyPanel
+            elementProps={selectedElementProps}
+            element={selectedElement}
+            onUpdateStyle={handleUpdateStyle}
+            onUpdateAttribute={handleUpdateAttribute}
+            onDelete={handleDeleteElement}
+            onDuplicate={handleDuplicateElement}
+            onOpenImageModal={handleOpenImageModal}
+          />
         </Sider>
       </Layout>
     </Layout>

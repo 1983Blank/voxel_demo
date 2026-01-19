@@ -614,5 +614,52 @@ end;
 $$ language plpgsql security definer;
 
 -- ============================================
+-- STORAGE BUCKETS
+-- For editor images and assets
+-- ============================================
+
+-- Create storage bucket for editor images (run this in Supabase Dashboard > Storage)
+-- The bucket should be named 'editor-images' and set to public
+
+-- Storage policies (these need to be set via Supabase Dashboard or SQL)
+-- 1. Allow authenticated users to upload to their own folder
+-- 2. Allow public read access to all images
+
+-- Example RLS policies for storage (run in SQL editor):
+/*
+-- Allow authenticated users to upload images
+create policy "Users can upload images"
+on storage.objects for insert
+with check (
+  bucket_id = 'editor-images' and
+  auth.role() = 'authenticated' and
+  (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Allow users to update their own images
+create policy "Users can update own images"
+on storage.objects for update
+using (
+  bucket_id = 'editor-images' and
+  auth.role() = 'authenticated' and
+  (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Allow users to delete their own images
+create policy "Users can delete own images"
+on storage.objects for delete
+using (
+  bucket_id = 'editor-images' and
+  auth.role() = 'authenticated' and
+  (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Allow public read access
+create policy "Public read access"
+on storage.objects for select
+using (bucket_id = 'editor-images');
+*/
+
+-- ============================================
 -- INITIAL SETUP COMPLETE
 -- ============================================
