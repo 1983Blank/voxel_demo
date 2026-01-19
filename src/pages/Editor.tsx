@@ -104,14 +104,33 @@ function removeCSP(html: string): string {
     .replace(/<meta[^>]*csp[^>]*>/gi, '');
 }
 
-// Helper to wrap HTML with permissive CSP for iframe preview
-function wrapWithCSP(html: string): string {
-  // Remove ALL existing CSP meta tags first
-  let result = removeCSP(html);
+// Create a blob URL from HTML - this avoids srcdoc CSP restrictions
+function createBlobUrl(html: string): string {
+  const cleanedHtml = removeCSP(html);
+  const blob = new Blob([cleanedHtml], { type: 'text/html' });
+  return URL.createObjectURL(blob);
+}
 
-  // We don't add a new CSP - just remove the restrictive ones
-  // The iframe sandbox attribute will handle permissions
-  return result;
+// Hook to manage blob URL lifecycle
+function useBlobUrl(html: string | null): string | undefined {
+  const [blobUrl, setBlobUrl] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!html) {
+      setBlobUrl(undefined);
+      return;
+    }
+
+    const url = createBlobUrl(html);
+    setBlobUrl(url);
+
+    // Cleanup: revoke the blob URL when component unmounts or html changes
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [html]);
+
+  return blobUrl;
 }
 
 // Fallback mock AI generation responses (when no API key is configured)
@@ -204,6 +223,10 @@ function AIPromptPanel() {
   const { getAIContextPrompt } = useContextStore();
 
   const productContext = getAIContextPrompt();
+
+  // Use blob URLs to avoid srcdoc CSP restrictions
+  const currentBlobUrl = useBlobUrl(currentHtml);
+  const generatedBlobUrl = useBlobUrl(generatedHtml);
 
   // Fetch configured providers on mount
   useEffect(() => {
@@ -779,7 +802,7 @@ function AIPromptPanel() {
             <Text style={{ fontSize: 11 }}>{prompt}</Text>
           </div>
 
-          {/* Preview Content */}
+          {/* Preview Content - Using blob URLs to avoid srcdoc CSP restrictions */}
           <div style={{ flex: 1, overflow: 'auto', display: 'flex' }}>
             {showCompare ? (
               // Side by side comparison
@@ -788,30 +811,36 @@ function AIPromptPanel() {
                   <div style={{ padding: '4px 8px', background: '#fff1f0', textAlign: 'center', flexShrink: 0 }}>
                     <Text type="secondary" style={{ fontSize: 10 }}>Original</Text>
                   </div>
-                  <iframe
-                    srcDoc={wrapWithCSP(currentHtml)}
-                    style={{ flex: 1, border: 'none', width: '100%' }}
-                    title="Original"
-                  />
+                  {currentBlobUrl && (
+                    <iframe
+                      src={currentBlobUrl}
+                      style={{ flex: 1, border: 'none', width: '100%' }}
+                      title="Original"
+                    />
+                  )}
                 </div>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                   <div style={{ padding: '4px 8px', background: '#f6ffed', textAlign: 'center', flexShrink: 0 }}>
                     <Text type="secondary" style={{ fontSize: 10 }}>Generated</Text>
                   </div>
-                  <iframe
-                    srcDoc={wrapWithCSP(generatedHtml)}
-                    style={{ flex: 1, border: 'none', width: '100%' }}
-                    title="Generated"
-                  />
+                  {generatedBlobUrl && (
+                    <iframe
+                      src={generatedBlobUrl}
+                      style={{ flex: 1, border: 'none', width: '100%' }}
+                      title="Generated"
+                    />
+                  )}
                 </div>
               </div>
             ) : (
               // Single preview
-              <iframe
-                srcDoc={wrapWithCSP(generatedHtml)}
-                style={{ flex: 1, border: 'none', width: '100%' }}
-                title="Preview"
-              />
+              generatedBlobUrl && (
+                <iframe
+                  src={generatedBlobUrl}
+                  style={{ flex: 1, border: 'none', width: '100%' }}
+                  title="Preview"
+                />
+              )
             )}
           </div>
 

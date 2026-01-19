@@ -462,10 +462,24 @@ export async function generateHtml(
   const supabaseConfigured = isSupabaseConfigured();
   console.log('[LLM] 📦 Step 2: isSupabaseConfigured =', supabaseConfigured);
 
-  if (!supabaseConfigured) {
-    console.log('[LLM] ⚠️ Supabase not configured, trying direct API call...');
-    // Fall back to direct API call for local development
-    return generateHtmlDirect(request);
+  // DEBUG: Set to true to bypass Edge Function and use direct API calls
+  const BYPASS_EDGE_FUNCTION = true;
+
+  // TEMPORARY TEST KEY - REMOVE AFTER TESTING
+  const TEST_GOOGLE_API_KEY = 'AIzaSyAH3jkkECXj5z7pDZVCpoWOYQmno0GBhSY';
+
+  if (!supabaseConfigured || BYPASS_EDGE_FUNCTION) {
+    console.log('[LLM] ⚠️ Bypassing Edge Function, using direct API call...');
+    console.log('[LLM] ⚠️ Reason:', !supabaseConfigured ? 'Supabase not configured' : 'BYPASS_EDGE_FUNCTION=true');
+
+    // Use test config directly
+    const testConfig: LLMConfig = {
+      provider: 'google',
+      apiKey: TEST_GOOGLE_API_KEY,
+      model: 'gemini-2.0-flash',
+    };
+    console.log('[LLM] 🧪 Using test Google API key for debugging');
+    return generateWithGoogle(testConfig, request);
   }
 
   // Get user session for authentication
