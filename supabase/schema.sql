@@ -467,83 +467,65 @@ create trigger prototypes_updated_at
   for each row execute function update_updated_at();
 
 -- ============================================
--- LLM API KEYS TABLE (with pgcrypto encryption)
--- Securely stores API keys for AI providers
+-- LLM API KEYS (using Supabase Vault)
+-- Securely stores API keys using native vault encryption
 -- ============================================
 
--- Enable pgcrypto extension for encryption
-create extension if not exists pgcrypto;
-
--- Drop old table if exists (for migration)
-drop table if exists user_api_keys cascade;
-
-create table user_api_keys (
+-- Reference table stores metadata, actual keys are in vault.secrets
+create table if not exists user_api_key_refs (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid references auth.users(id) on delete cascade not null,
   provider text not null check (provider in ('anthropic', 'openai', 'google')),
+  vault_secret_name text not null, -- Reference to vault.secrets.name
   key_name text not null default 'Default',
-  -- Store the encrypted API key directly
-  encrypted_key text not null,
   model text,
   is_active boolean default true,
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
-  -- Each user can only have one active key per provider
+  -- Each user can only have one key per provider
   unique(user_id, provider)
 );
 
-create index if not exists user_api_keys_user_id_idx on user_api_keys(user_id);
+create index if not exists user_api_key_refs_user_id_idx on user_api_key_refs(user_id);
+create index if not exists user_api_key_refs_vault_secret_name_idx on user_api_key_refs(vault_secret_name);
 
-alter table user_api_keys enable row level security;
+alter table user_api_key_refs enable row level security;
 
--- Users can only view their own API keys
-create policy "Users can view own API keys"
-  on user_api_keys for select
+-- RLS Policies
+create policy "Users can view own API key refs"
+  on user_api_key_refs for select
   using (auth.uid() = user_id);
 
-create policy "Users can insert own API keys"
-  on user_api_keys for insert
+create policy "Users can insert own API key refs"
+  on user_api_key_refs for insert
   with check (auth.uid() = user_id);
 
-create policy "Users can update own API keys"
-  on user_api_keys for update
+create policy "Users can update own API key refs"
+  on user_api_key_refs for update
   using (auth.uid() = user_id);
 
-create policy "Users can delete own API keys"
-  on user_api_keys for delete
+create policy "Users can delete own API key refs"
+  on user_api_key_refs for delete
   using (auth.uid() = user_id);
 
 -- Trigger for updated_at
-drop trigger if exists user_api_keys_updated_at on user_api_keys;
-create trigger user_api_keys_updated_at
-  before update on user_api_keys
+create trigger user_api_key_refs_updated_at
+  before update on user_api_key_refs
   for each row execute function update_updated_at();
 
 -- ============================================
--- API KEY HELPER FUNCTIONS
--- Functions to safely store and retrieve API keys
--- Uses pgcrypto with a server-side encryption key
+-- VAULT-BASED API KEY FUNCTIONS
 -- ============================================
 
--- IMPORTANT: Set this encryption key as a Supabase secret
--- In Supabase Dashboard > Settings > Edge Functions > Secrets
--- Or use: SELECT set_config('app.encryption_key', 'your-32-char-secret-key-here!!', false);
--- For production, store this in vault.secrets and retrieve it
-
--- Function to get the encryption key (set this up in your environment)
-create or replace function get_encryption_key()
+-- Generate a unique vault secret name for a user's API key
+create or replace function generate_vault_secret_name(p_user_id uuid, p_provider text)
 returns text as $$
 begin
-  -- Try to get from session config first (for testing)
-  -- In production, you should use a proper secret management approach
-  return coalesce(
-    current_setting('app.encryption_key', true),
-    'voxel-default-key-change-in-prod!'  -- 32 chars, CHANGE THIS IN PRODUCTION
-  );
+  return 'api_key_' || p_user_id::text || '_' || p_provider;
 end;
-$$ language plpgsql stable security definer;
+$$ language plpgsql immutable;
 
--- Function to store an API key (encrypted)
+-- Store an API key in the vault
 create or replace function store_api_key(
   p_user_id uuid,
   p_provider text,
@@ -553,64 +535,88 @@ create or replace function store_api_key(
 )
 returns uuid as $$
 declare
-  v_encrypted text;
-  v_key_id uuid;
+  v_secret_name text;
+  v_secret_id uuid;
+  v_ref_id uuid;
 begin
-  -- Encrypt the API key
-  v_encrypted := encode(
-    pgp_sym_encrypt(p_api_key, get_encryption_key()),
-    'base64'
-  );
+  -- Generate unique secret name
+  v_secret_name := generate_vault_secret_name(p_user_id, p_provider);
 
-  -- Delete existing key for this provider if exists
-  delete from user_api_keys
+  -- Delete existing vault secret if exists (by name)
+  delete from vault.secrets where name = v_secret_name;
+
+  -- Delete existing reference if exists
+  delete from user_api_key_refs
   where user_id = p_user_id and provider = p_provider;
 
-  -- Insert new key
-  insert into user_api_keys (user_id, provider, key_name, encrypted_key, model, is_active)
-  values (p_user_id, p_provider, p_key_name, v_encrypted, p_model, true)
-  returning id into v_key_id;
+  -- Create new vault secret with the unique name
+  select vault.create_secret(p_api_key, v_secret_name, 'API key for ' || p_provider)
+  into v_secret_id;
 
-  return v_key_id;
+  -- Create reference record
+  insert into user_api_key_refs (user_id, provider, vault_secret_name, key_name, model, is_active)
+  values (p_user_id, p_provider, v_secret_name, p_key_name, p_model, true)
+  returning id into v_ref_id;
+
+  return v_ref_id;
 end;
 $$ language plpgsql security definer;
 
--- Function to retrieve a decrypted API key
+-- Retrieve a decrypted API key from the vault
 create or replace function get_api_key(p_user_id uuid, p_provider text)
 returns text as $$
 declare
-  v_encrypted text;
-  v_decrypted text;
+  v_secret_name text;
+  v_decrypted_secret text;
 begin
-  -- Get the encrypted key
-  select encrypted_key into v_encrypted
-  from user_api_keys
+  -- Get the vault secret name from the reference
+  select vault_secret_name into v_secret_name
+  from user_api_key_refs
   where user_id = p_user_id and provider = p_provider and is_active = true;
 
-  if v_encrypted is null then
+  if v_secret_name is null then
     return null;
   end if;
 
-  -- Decrypt and return
-  v_decrypted := pgp_sym_decrypt(
-    decode(v_encrypted, 'base64'),
-    get_encryption_key()
-  );
+  -- Get the decrypted secret from vault
+  select decrypted_secret into v_decrypted_secret
+  from vault.decrypted_secrets
+  where name = v_secret_name;
 
-  return v_decrypted;
+  return v_decrypted_secret;
 end;
 $$ language plpgsql security definer;
 
--- Function to delete an API key
+-- Delete an API key from the vault
 create or replace function delete_api_key(p_user_id uuid, p_provider text)
 returns boolean as $$
+declare
+  v_secret_name text;
 begin
-  delete from user_api_keys
+  -- Get the vault secret name
+  select vault_secret_name into v_secret_name
+  from user_api_key_refs
   where user_id = p_user_id and provider = p_provider;
 
-  return found;
+  if v_secret_name is null then
+    return false;
+  end if;
+
+  -- Delete from vault
+  delete from vault.secrets where name = v_secret_name;
+
+  -- Delete reference
+  delete from user_api_key_refs
+  where user_id = p_user_id and provider = p_provider;
+
+  return true;
 end;
 $$ language plpgsql security definer;
+
+-- Grant permissions for service role (needed for Edge Functions)
+grant usage on schema vault to service_role;
+grant select on vault.decrypted_secrets to service_role;
+grant execute on function vault.create_secret(text, text, text) to service_role;
 
 -- ============================================
 -- STORAGE BUCKETS

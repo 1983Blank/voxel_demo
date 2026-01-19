@@ -94,7 +94,7 @@ export async function getApiKeys(): Promise<ApiKeyConfig[]> {
   if (!user) return [];
 
   const { data, error } = await supabase
-    .from('user_api_keys')
+    .from('user_api_key_refs')
     .select('*')
     .order('created_at', { ascending: false });
 
@@ -273,13 +273,13 @@ export async function setActiveProvider(provider: LLMProvider): Promise<void> {
 
   // Deactivate all keys first
   await supabase
-    .from('user_api_keys')
+    .from('user_api_key_refs')
     .update({ is_active: false })
     .eq('user_id', user.id);
 
   // Activate the selected provider
   await supabase
-    .from('user_api_keys')
+    .from('user_api_key_refs')
     .update({ is_active: true })
     .eq('user_id', user.id)
     .eq('provider', provider);

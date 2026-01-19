@@ -209,7 +209,7 @@ Deno.serve(async (req) => {
 
     // Get user's active API key configuration
     const { data: keyConfig, error: keyError } = await supabaseService
-      .from('user_api_keys')
+      .from('user_api_key_refs')
       .select('*')
       .eq('user_id', user.id)
       .eq('is_active', true)
