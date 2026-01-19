@@ -511,63 +511,31 @@ export async function generateHtml(
   console.log('[LLM] 📦 Step 4: Calling Edge Function...');
 
   try {
-    // Call the Edge Function
-    console.log('[LLM] 📤 Invoking Edge Function generate-html...');
-    console.log('[LLM] 📤 Supabase URL:', import.meta.env.VITE_SUPABASE_URL);
-
-    // Explicitly pass the Authorization and apikey headers
+    // Call the Edge Function directly with fetch
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    console.log('[LLM] 📤 Using anon key:', supabaseAnonKey ? supabaseAnonKey.substring(0, 20) + '...' : 'MISSING');
+    console.log('[LLM] 📤 Invoking Edge Function generate-html...');
+    console.log('[LLM] 📤 Supabase URL:', supabaseUrl);
 
-    const { data, error } = await supabase.functions.invoke('generate-html', {
-      body: request,
+    const response = await fetch(`${supabaseUrl}/functions/v1/generate-html`, {
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        apikey: supabaseAnonKey,
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': supabaseAnonKey,
       },
+      body: JSON.stringify(request),
     });
 
-    console.log('[LLM] 📥 Edge Function response:', { data, error });
-    console.log('[LLM] 📥 Error details:', error ? JSON.stringify(error, null, 2) : 'none');
+    const data = await response.json();
+    console.log('[LLM] 📥 Edge Function response:', data);
 
-    if (error) {
-      console.log('[LLM] ❌ Edge Function error:', error);
-      console.log('[LLM] ❌ Error name:', error.name);
-      console.log('[LLM] ❌ Error message:', error.message);
-      console.log('[LLM] ❌ Error context:', (error as any).context);
-
-      // Extract actual error message from the Response body
-      let actualErrorMessage = error.message || 'Edge Function error';
-      const context = (error as any).context;
-      if (context && context instanceof Response) {
-        try {
-          // Clone the response in case body was already consumed
-          const clonedResponse = context.clone ? context.clone() : context;
-          const errorBody = await clonedResponse.json();
-          console.log('[LLM] ❌ Error body from Edge Function:', errorBody);
-          if (errorBody.error) {
-            actualErrorMessage = errorBody.error;
-          }
-        } catch (parseError) {
-          console.log('[LLM] ❌ Could not parse error body:', parseError);
-          // Try to read as text as fallback
-          try {
-            const textBody = await context.text();
-            console.log('[LLM] ❌ Error body as text:', textBody);
-            if (textBody) {
-              actualErrorMessage = textBody;
-            }
-          } catch {
-            // Body already consumed, can't read it
-            console.log('[LLM] ❌ Response body already consumed');
-          }
-        }
-      }
-
+    if (!response.ok) {
+      console.log('[LLM] ❌ Edge Function error:', data);
       return {
         html: request.currentHtml,
         success: false,
-        error: actualErrorMessage,
+        error: data.error || `HTTP ${response.status}: ${response.statusText}`,
       };
     }
 

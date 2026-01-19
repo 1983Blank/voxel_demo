@@ -175,26 +175,22 @@ Deno.serve(async (req) => {
       throw new Error('Missing Supabase environment variables')
     }
 
-    // Get authorization header
+    // Get JWT from authorization header
     const authHeader = req.headers.get('Authorization')
     console.log('[Edge] Authorization header:', authHeader ? 'present' : 'MISSING')
-    if (!authHeader) {
-      throw new Error('Missing authorization header')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      throw new Error('Missing or invalid authorization header')
     }
+    const jwt = authHeader.replace('Bearer ', '')
 
-    // Client for user authentication
-    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    })
-
-    // Service client for accessing encrypted keys
+    // Service client for all operations
     const supabaseService = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Get the user
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser()
+    // Verify user using service client with the JWT
+    const { data: { user }, error: userError } = await supabaseService.auth.getUser(jwt)
     if (userError || !user) {
       console.log('[Edge] Auth error:', userError)
-      throw new Error('Unauthorized')
+      throw new Error(`Unauthorized: ${userError?.message || 'Invalid token'}`)
     }
     console.log('[Edge] User authenticated:', user.id)
 
