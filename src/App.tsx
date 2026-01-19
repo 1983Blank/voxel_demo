@@ -7,6 +7,7 @@ import {
   Dashboard,
   Users,
   Login,
+  AuthCallback,
   Screens,
   Components,
   Editor,
@@ -118,6 +119,9 @@ function App() {
 
               {/* Shared view (public) */}
               <Route path="/view/:shareLink" element={<SharedView />} />
+
+              {/* Auth callback for OAuth */}
+              <Route path="/auth/callback" element={<AuthCallback />} />
 
               {/* Catch all */}
               <Route path="*" element={<Navigate to="/screens" replace />} />

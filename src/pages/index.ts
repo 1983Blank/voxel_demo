@@ -1,6 +1,7 @@
 export { Dashboard } from './Dashboard';
 export { Users } from './Users';
 export { Login } from './Login';
+export { AuthCallback } from './AuthCallback';
 
 // Voxel Pages
 export { Screens } from './Screens';
