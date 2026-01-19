@@ -22,7 +22,6 @@ import {
   Tabs,
   Select,
   Alert,
-  Steps,
   Progress,
 } from 'antd';
 import {
@@ -60,7 +59,6 @@ import {
   RobotOutlined,
   ThunderboltOutlined,
   CloseCircleOutlined,
-  CloudOutlined,
   CodeOutlined,
   CheckOutlined,
   RollbackOutlined,
