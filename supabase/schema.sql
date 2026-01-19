@@ -467,5 +467,152 @@ create trigger prototypes_updated_at
   for each row execute function update_updated_at();
 
 -- ============================================
+-- LLM API KEYS TABLE (with Vault integration)
+-- Securely stores API keys for AI providers
+-- ============================================
+
+-- Enable the vault extension (must be done by Supabase - it's already available)
+-- The vault stores encrypted secrets and returns a UUID reference
+
+create table if not exists user_api_keys (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  provider text not null check (provider in ('anthropic', 'openai', 'google')),
+  key_name text not null default 'Default',
+  -- Store the vault secret ID, not the actual key
+  vault_secret_id uuid not null,
+  model text,
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  -- Each user can only have one active key per provider
+  unique(user_id, provider)
+);
+
+create index if not exists user_api_keys_user_id_idx on user_api_keys(user_id);
+
+alter table user_api_keys enable row level security;
+
+-- Users can only view their own API keys
+create policy "Users can view own API keys"
+  on user_api_keys for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert own API keys"
+  on user_api_keys for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update own API keys"
+  on user_api_keys for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete own API keys"
+  on user_api_keys for delete
+  using (auth.uid() = user_id);
+
+-- Trigger for updated_at
+create trigger user_api_keys_updated_at
+  before update on user_api_keys
+  for each row execute function update_updated_at();
+
+-- ============================================
+-- VAULT HELPER FUNCTIONS
+-- Functions to safely store and retrieve API keys
+-- ============================================
+
+-- Function to store an API key in the vault and return the secret ID
+create or replace function store_api_key(
+  p_user_id uuid,
+  p_provider text,
+  p_api_key text,
+  p_key_name text default 'Default',
+  p_model text default null
+)
+returns uuid as $$
+declare
+  v_secret_id uuid;
+  v_existing_id uuid;
+begin
+  -- Check if user already has a key for this provider
+  select vault_secret_id into v_existing_id
+  from user_api_keys
+  where user_id = p_user_id and provider = p_provider;
+
+  -- If exists, delete the old vault secret first
+  if v_existing_id is not null then
+    -- Delete old secret from vault
+    delete from vault.secrets where id = v_existing_id;
+    -- Delete old record
+    delete from user_api_keys where user_id = p_user_id and provider = p_provider;
+  end if;
+
+  -- Create a new vault secret
+  insert into vault.secrets (secret, name, description)
+  values (
+    p_api_key,
+    p_provider || '_key_' || p_user_id,
+    'API key for ' || p_provider || ' - User: ' || p_user_id
+  )
+  returning id into v_secret_id;
+
+  -- Store reference in user_api_keys
+  insert into user_api_keys (user_id, provider, key_name, vault_secret_id, model)
+  values (p_user_id, p_provider, p_key_name, v_secret_id, p_model);
+
+  return v_secret_id;
+end;
+$$ language plpgsql security definer;
+
+-- Function to retrieve an API key from the vault
+create or replace function get_api_key(p_user_id uuid, p_provider text)
+returns text as $$
+declare
+  v_secret_id uuid;
+  v_api_key text;
+begin
+  -- Get the vault secret ID
+  select vault_secret_id into v_secret_id
+  from user_api_keys
+  where user_id = p_user_id and provider = p_provider and is_active = true;
+
+  if v_secret_id is null then
+    return null;
+  end if;
+
+  -- Get the decrypted secret from vault
+  select decrypted_secret into v_api_key
+  from vault.decrypted_secrets
+  where id = v_secret_id;
+
+  return v_api_key;
+end;
+$$ language plpgsql security definer;
+
+-- Function to delete an API key
+create or replace function delete_api_key(p_user_id uuid, p_provider text)
+returns boolean as $$
+declare
+  v_secret_id uuid;
+begin
+  -- Get the vault secret ID
+  select vault_secret_id into v_secret_id
+  from user_api_keys
+  where user_id = p_user_id and provider = p_provider;
+
+  if v_secret_id is null then
+    return false;
+  end if;
+
+  -- Delete from vault
+  delete from vault.secrets where id = v_secret_id;
+
+  -- Delete from user_api_keys (cascade should handle this but be explicit)
+  delete from user_api_keys where user_id = p_user_id and provider = p_provider;
+
+  return true;
+end;
+$$ language plpgsql security definer;
+
+-- ============================================
 -- INITIAL SETUP COMPLETE
 -- ============================================

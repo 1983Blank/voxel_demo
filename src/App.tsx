@@ -9,6 +9,7 @@ import {
   Login,
   AuthCallback,
   Admin,
+  Settings,
   Screens,
   Components,
   Editor,
@@ -115,6 +116,9 @@ function App() {
 
                 {/* Admin routes */}
                 <Route path="/admin" element={<Admin />} />
+
+                {/* Settings */}
+                <Route path="/settings" element={<Settings />} />
 
                 {/* Legacy routes (can be removed) */}
                 <Route path="/dashboard" element={<Dashboard />} />

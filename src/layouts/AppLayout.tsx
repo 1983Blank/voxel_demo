@@ -15,6 +15,7 @@ import {
   UserOutlined,
   TeamOutlined,
   CrownOutlined,
+  KeyOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 
@@ -68,6 +69,19 @@ const getMenuItems = (isAdmin: boolean): MenuProps['items'] => [
       },
     ],
   },
+  // Settings section
+  {
+    key: 'settings',
+    type: 'group',
+    label: 'SETTINGS',
+    children: [
+      {
+        key: '/settings',
+        icon: <KeyOutlined />,
+        label: 'API Keys',
+      },
+    ],
+  },
   // Admin section - only visible to admins
   ...(isAdmin ? [{
     key: 'admin',
@@ -102,6 +116,9 @@ export function AppLayout() {
       key: 'settings',
       icon: <SettingOutlined />,
       label: 'Settings',
+      onClick: () => {
+        navigate('/settings');
+      },
     },
     {
       type: 'divider',

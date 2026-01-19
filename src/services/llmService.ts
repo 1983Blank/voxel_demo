@@ -1,12 +1,19 @@
 /**
  * LLM Service for AI-powered prototype generation
  *
- * Supports both Anthropic Claude and OpenAI GPT models.
- * Configure your API key in environment variables.
+ * Supports Anthropic Claude, OpenAI GPT, and Google Gemini models.
+ * API keys are securely stored in Supabase Vault.
  */
 
+import {
+  getDecryptedApiKey,
+  getActiveProvider,
+  getActiveKeyConfig,
+  type LLMProvider,
+} from './apiKeysService';
+
 export interface LLMConfig {
-  provider: 'anthropic' | 'openai';
+  provider: LLMProvider;
   apiKey: string;
   model?: string;
 }
@@ -29,6 +36,7 @@ export interface GenerationResponse {
 const DEFAULT_MODELS = {
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
+  google: 'gemini-1.5-pro',
 };
 
 // System prompt for HTML generation
@@ -49,12 +57,13 @@ When modifying:
 - "Style" means only change CSS/styling`;
 
 /**
- * Get LLM configuration from environment or localStorage
+ * Get LLM configuration from environment or Supabase Vault
+ * This is an async function that fetches the decrypted key from Supabase
  */
-export function getLLMConfig(): LLMConfig | null {
-  // Check environment variables first (for production)
+export async function getLLMConfigAsync(): Promise<LLMConfig | null> {
+  // Check environment variables first (for production/testing)
   const envApiKey = import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.VITE_OPENAI_API_KEY;
-  const envProvider = import.meta.env.VITE_ANTHROPIC_API_KEY ? 'anthropic' : 'openai';
+  const envProvider: LLMProvider = import.meta.env.VITE_ANTHROPIC_API_KEY ? 'anthropic' : 'openai';
 
   if (envApiKey) {
     return {
@@ -64,7 +73,46 @@ export function getLLMConfig(): LLMConfig | null {
     };
   }
 
-  // Check localStorage (for development/user config)
+  // Get active provider from Supabase
+  const activeProvider = await getActiveProvider();
+  if (!activeProvider) {
+    return null;
+  }
+
+  // Get the decrypted API key from Supabase Vault
+  const apiKey = await getDecryptedApiKey(activeProvider);
+  if (!apiKey) {
+    return null;
+  }
+
+  // Get the model configuration
+  const keyConfig = await getActiveKeyConfig(activeProvider);
+
+  return {
+    provider: activeProvider,
+    apiKey,
+    model: keyConfig?.model || DEFAULT_MODELS[activeProvider],
+  };
+}
+
+/**
+ * Synchronous version - checks localStorage cache for quick UI checks
+ * For actual API calls, use getLLMConfigAsync
+ */
+export function getLLMConfig(): LLMConfig | null {
+  // Check environment variables first
+  const envApiKey = import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.VITE_OPENAI_API_KEY;
+  const envProvider: LLMProvider = import.meta.env.VITE_ANTHROPIC_API_KEY ? 'anthropic' : 'openai';
+
+  if (envApiKey) {
+    return {
+      provider: envProvider,
+      apiKey: envApiKey,
+      model: DEFAULT_MODELS[envProvider],
+    };
+  }
+
+  // Check localStorage cache (for quick UI checks)
   const stored = localStorage.getItem('voxel-llm-config');
   if (stored) {
     try {
@@ -78,21 +126,36 @@ export function getLLMConfig(): LLMConfig | null {
 }
 
 /**
- * Save LLM configuration to localStorage
+ * Save LLM configuration - now redirects to apiKeysService
+ * This is kept for backward compatibility with existing code
  */
-export function saveLLMConfig(config: LLMConfig): void {
-  localStorage.setItem('voxel-llm-config', JSON.stringify(config));
+export async function saveLLMConfig(config: LLMConfig): Promise<void> {
+  // Import dynamically to avoid circular dependency
+  const { saveApiKey } = await import('./apiKeysService');
+  await saveApiKey({
+    provider: config.provider,
+    apiKey: config.apiKey,
+    model: config.model,
+  });
 }
 
 /**
  * Clear LLM configuration
  */
-export function clearLLMConfig(): void {
+export async function clearLLMConfig(): Promise<void> {
   localStorage.removeItem('voxel-llm-config');
 }
 
 /**
- * Check if LLM is configured
+ * Check if LLM is configured (async version for accurate check)
+ */
+export async function isLLMConfiguredAsync(): Promise<boolean> {
+  const config = await getLLMConfigAsync();
+  return config !== null;
+}
+
+/**
+ * Check if LLM is configured (sync version - may be stale)
  */
 export function isLLMConfigured(): boolean {
   return getLLMConfig() !== null;
@@ -220,6 +283,59 @@ function buildUserMessage(request: GenerationRequest): string {
 }
 
 /**
+ * Generate HTML using Google Gemini API
+ */
+async function generateWithGoogle(
+  config: LLMConfig,
+  request: GenerationRequest
+): Promise<GenerationResponse> {
+  const userMessage = buildUserMessage(request);
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${config.model || DEFAULT_MODELS.google}:generateContent?key=${config.apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: SYSTEM_PROMPT + '\n\n' + userMessage },
+              ],
+            },
+          ],
+          generationConfig: {
+            maxOutputTokens: 8192,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error?.message || 'Google AI API error');
+    }
+
+    const data = await response.json();
+    const html = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    return {
+      html: cleanHtmlResponse(html),
+      success: true,
+    };
+  } catch (error) {
+    return {
+      html: request.currentHtml,
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
  * Clean HTML response from LLM (remove markdown code blocks if present)
  */
 function cleanHtmlResponse(html: string): string {
@@ -245,20 +361,30 @@ function cleanHtmlResponse(html: string): string {
 export async function generateHtml(
   request: GenerationRequest
 ): Promise<GenerationResponse> {
-  const config = getLLMConfig();
+  // Use async version to get the latest config from Supabase
+  const config = await getLLMConfigAsync();
 
   if (!config) {
     return {
       html: request.currentHtml,
       success: false,
-      error: 'LLM not configured. Please set your API key in settings.',
+      error: 'LLM not configured. Please add your API key in Settings → API Keys.',
     };
   }
 
-  if (config.provider === 'anthropic') {
-    return generateWithAnthropic(config, request);
-  } else {
-    return generateWithOpenAI(config, request);
+  switch (config.provider) {
+    case 'anthropic':
+      return generateWithAnthropic(config, request);
+    case 'openai':
+      return generateWithOpenAI(config, request);
+    case 'google':
+      return generateWithGoogle(config, request);
+    default:
+      return {
+        html: request.currentHtml,
+        success: false,
+        error: `Unsupported provider: ${config.provider}`,
+      };
   }
 }
 
@@ -266,7 +392,7 @@ export async function generateHtml(
  * Test LLM connection
  */
 export async function testLLMConnection(): Promise<{ success: boolean; error?: string }> {
-  const config = getLLMConfig();
+  const config = await getLLMConfigAsync();
 
   if (!config) {
     return { success: false, error: 'No API key configured' };
