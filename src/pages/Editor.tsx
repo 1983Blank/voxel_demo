@@ -362,6 +362,8 @@ function AIPromptPanel() {
       currentHtml: compacted.html,  // Use compacted HTML
       context: productContext || undefined,
       instruction: generationMode,
+      provider: selectedProvider || undefined,
+      model: selectedModel || undefined,
     });
 
     console.log('[Editor] 📥 Response received:', {

@@ -30,6 +30,8 @@ interface GenerateRequest {
   currentHtml: string
   context?: string
   instruction?: 'modify' | 'add' | 'remove' | 'style'
+  provider?: 'anthropic' | 'openai' | 'google'
+  model?: string
 }
 
 // Clean HTML response from LLM
@@ -204,18 +206,42 @@ Deno.serve(async (req) => {
     })
 
     // Get user's active API key configuration
-    const { data: keyConfig, error: keyError } = await supabaseService
+    console.log('[Edge] Querying user_api_key_refs for user_id:', user.id)
+
+    // First, let's see ALL keys for this user (without is_active filter)
+    const { data: allKeys, error: allKeysError } = await supabaseService
+      .from('user_api_key_refs')
+      .select('*')
+      .eq('user_id', user.id)
+
+    console.log('[Edge] All keys for user:', { count: allKeys?.length, keys: allKeys, error: allKeysError })
+
+    // Check if a specific provider was requested
+    const requestedProvider = body.provider
+
+    let keyQuery = supabaseService
       .from('user_api_key_refs')
       .select('*')
       .eq('user_id', user.id)
       .eq('is_active', true)
-      .single()
+
+    // If provider specified, filter by it; otherwise just get the first active one
+    if (requestedProvider) {
+      keyQuery = keyQuery.eq('provider', requestedProvider)
+    }
+
+    const { data: keyConfigs, error: keyError } = await keyQuery.limit(1)
+    const keyConfig = keyConfigs?.[0]
 
     if (keyError || !keyConfig) {
       console.log('[Edge] No API key found:', keyError)
+      console.log('[Edge] keyConfig value:', keyConfig)
       throw new Error('No API key configured. Please add your API key in Settings.')
     }
-    console.log('[Edge] Found API key config:', { provider: keyConfig.provider, model: keyConfig.model })
+    // Use requested model if provided, otherwise fall back to stored model
+    const modelToUse = body.model || keyConfig.model
+    console.log('[Edge] Found API key config:', { provider: keyConfig.provider, storedModel: keyConfig.model })
+    console.log('[Edge] Using model:', modelToUse, body.model ? '(from request)' : '(from config)')
 
     // Get decrypted API key using the database function
     const { data: apiKey, error: decryptError } = await supabaseService
@@ -232,13 +258,13 @@ Deno.serve(async (req) => {
 
     switch (keyConfig.provider) {
       case 'anthropic':
-        generatedHtml = await generateWithAnthropic(apiKey, keyConfig.model, body)
+        generatedHtml = await generateWithAnthropic(apiKey, modelToUse, body)
         break
       case 'openai':
-        generatedHtml = await generateWithOpenAI(apiKey, keyConfig.model, body)
+        generatedHtml = await generateWithOpenAI(apiKey, modelToUse, body)
         break
       case 'google':
-        generatedHtml = await generateWithGoogle(apiKey, keyConfig.model, body)
+        generatedHtml = await generateWithGoogle(apiKey, modelToUse, body)
         break
       default:
         throw new Error(`Unsupported provider: ${keyConfig.provider}`)

@@ -23,6 +23,8 @@ export interface GenerationRequest {
   currentHtml: string;
   context?: string; // Product context
   instruction?: 'modify' | 'add' | 'remove' | 'style';
+  provider?: LLMProvider; // Selected provider for generation
+  model?: string; // Selected model for generation
 }
 
 export interface GenerationResponse {
