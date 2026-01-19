@@ -337,7 +337,6 @@ async function libMinifierAggressive(html: string): Promise<string> {
       conservativeCollapse: false,
       collapseInlineTagWhitespace: true,
       removeComments: true,
-      removeCommentsFromCDATA: true,
       removeRedundantAttributes: true,
       removeEmptyAttributes: true,
       removeEmptyElements: false,  // Keep structure

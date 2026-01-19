@@ -86,7 +86,6 @@ import {
   estimateTokens,
   type CompactionMethod,
   type CompactionResult,
-  type MethodInfo,
 } from '@/services/htmlCompactor';
 
 const { Sider } = Layout;

@@ -610,8 +610,9 @@ export async function generateHtml(
 
 /**
  * Direct API call fallback for local development without Edge Functions
+ * Exported for potential future use in development mode
  */
-async function generateHtmlDirect(
+export async function generateHtmlDirect(
   request: GenerationRequest
 ): Promise<GenerationResponse> {
   console.log('[LLM] 🔄 Using direct API call (development mode)...');
