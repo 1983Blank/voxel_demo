@@ -57,39 +57,16 @@ Deno.serve(async (req) => {
     // Generate vault secret name
     const vaultSecretName = `api_key_${user.id}_${provider}`
 
-    // Delete existing vault secret if exists (using service role)
-    await supabaseService
-      .from('vault.secrets')
-      .delete()
-      .eq('name', vaultSecretName)
+    // Insert into vault using the SQL function (has security definer)
+    const { error: vaultError } = await supabaseService.rpc('insert_vault_secret', {
+      p_secret: apiKey,
+      p_name: vaultSecretName,
+      p_description: `API key for ${provider}`
+    })
 
-    // Try direct SQL for vault insert since it needs special handling
-    const { error: vaultError } = await supabaseService.rpc('exec_sql', {
-      query: `
-        DELETE FROM vault.secrets WHERE name = '${vaultSecretName}';
-        INSERT INTO vault.secrets (secret, name, description)
-        VALUES ('${apiKey}', '${vaultSecretName}', 'API key for ${provider}');
-      `
-    }).maybeSingle()
-
-    // If exec_sql doesn't exist, try direct insert
     if (vaultError) {
-      console.log('[store-api-key] exec_sql failed, trying direct insert:', vaultError.message)
-
-      // Direct SQL execution via service role
-      const { error: insertError } = await supabaseService
-        .schema('vault')
-        .from('secrets')
-        .insert({
-          secret: apiKey,
-          name: vaultSecretName,
-          description: `API key for ${provider}`
-        })
-
-      if (insertError) {
-        console.error('[store-api-key] Vault insert error:', insertError)
-        throw new Error(`Failed to store in vault: ${insertError.message}`)
-      }
+      console.error('[store-api-key] Vault insert error:', vaultError)
+      throw new Error(`Failed to store in vault: ${vaultError.message}`)
     }
 
     // Store reference using the simplified function
@@ -114,10 +91,15 @@ Deno.serve(async (req) => {
     )
 
   } catch (error) {
-    console.error('[store-api-key] Error:', error.message)
+    console.error('[store-api-key] Error:', error)
     return new Response(
-      JSON.stringify({ success: false, error: error.message }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({
+        success: false,
+        error: error.message,
+        stack: error.stack,
+        details: String(error)
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 })

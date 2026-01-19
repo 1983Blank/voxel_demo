@@ -46,12 +46,10 @@ Deno.serve(async (req) => {
 
     const vaultSecretName = `api_key_${user.id}_${provider}`
 
-    // Delete from vault using service role
-    const { error: vaultError } = await supabaseService
-      .schema('vault')
-      .from('secrets')
-      .delete()
-      .eq('name', vaultSecretName)
+    // Delete from vault using the SQL function
+    const { error: vaultError } = await supabaseService.rpc('delete_vault_secret', {
+      p_name: vaultSecretName
+    })
 
     if (vaultError) {
       console.log('[delete-api-key] Vault delete warning:', vaultError.message)

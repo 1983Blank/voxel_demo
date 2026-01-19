@@ -167,6 +167,9 @@ export async function saveApiKey(params: SaveApiKeyParams): Promise<void> {
       keyName,
       model: model || providerInfo.defaultModel,
     },
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
   });
 
   if (error) {
@@ -174,8 +177,10 @@ export async function saveApiKey(params: SaveApiKeyParams): Promise<void> {
     throw new Error(`Failed to save API key: ${error.message}`);
   }
 
+  console.log('[apiKeysService] Edge Function response:', data);
+
   if (!data?.success) {
-    throw new Error(data?.error || 'Failed to save API key');
+    throw new Error(data?.error || data?.details || 'Failed to save API key');
   }
 }
 
@@ -211,6 +216,9 @@ export async function deleteApiKey(provider: LLMProvider): Promise<void> {
   // Call Edge Function to delete from vault
   const { data, error } = await supabase.functions.invoke('delete-api-key', {
     body: { provider },
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
   });
 
   if (error) {
