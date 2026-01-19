@@ -154,13 +154,17 @@ export async function saveApiKey(params: SaveApiKeyParams): Promise<void> {
     return;
   }
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
+  // Refresh session to ensure we have a valid token
+  const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+  if (sessionError || !session) {
+    console.error('Session error:', sessionError);
     throw new Error('You must be logged in to save API keys');
   }
 
   // Call Edge Function directly with fetch (more reliable auth)
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  console.log('[apiKeysService] Using token:', session.access_token?.substring(0, 20) + '...');
+
   const response = await fetch(`${supabaseUrl}/functions/v1/store-api-key`, {
     method: 'POST',
     headers: {
@@ -213,8 +217,10 @@ export async function deleteApiKey(provider: LLMProvider): Promise<void> {
     return;
   }
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
+  // Refresh session to ensure we have a valid token
+  const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+  if (sessionError || !session) {
+    console.error('Session error:', sessionError);
     throw new Error('You must be logged in to delete API keys');
   }
 
