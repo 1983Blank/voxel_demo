@@ -5,7 +5,6 @@ import {
   Button,
   Space,
   Input,
-  Card,
   Empty,
   Typography,
   Tooltip,
@@ -23,6 +22,8 @@ import {
   Tabs,
   Select,
   Alert,
+  Steps,
+  Progress,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -58,7 +59,13 @@ import {
   SettingOutlined,
   RobotOutlined,
   ThunderboltOutlined,
-  CheckCircleOutlined,
+  CloseCircleOutlined,
+  CloudOutlined,
+  CodeOutlined,
+  CheckOutlined,
+  RollbackOutlined,
+  EyeOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import { useScreensStore } from '@/store/screensStore';
 import { useEditorStore } from '@/store/editorStore';
@@ -118,6 +125,19 @@ function getMockResponse(prompt: string): string {
   </div>`;
 }
 
+// Generation stage type
+type GenerationStage = 'idle' | 'preparing' | 'sending' | 'processing' | 'complete' | 'error';
+
+// Version history item
+interface GenerationVersion {
+  id: string;
+  prompt: string;
+  html: string;
+  timestamp: Date;
+  provider: string;
+  model: string;
+}
+
 function AIPromptPanel() {
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
@@ -127,13 +147,23 @@ function AIPromptPanel() {
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [isLoadingProviders, setIsLoadingProviders] = useState(true);
   const [generationMode, setGenerationMode] = useState<'modify' | 'add'>('modify');
+
+  // Progress tracking
+  const [generationStage, setGenerationStage] = useState<GenerationStage>('idle');
+  const [stageMessage, setStageMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Version history
+  const [versions, setVersions] = useState<GenerationVersion[]>([]);
+  const [currentVersionIndex, setCurrentVersionIndex] = useState(-1);
+  const [showCompare, setShowCompare] = useState(false);
+
   const {
     isGenerating,
     setGenerating,
     addGenerationToHistory,
     updateHtml,
     currentHtml,
-    generationHistory,
   } = useEditorStore();
   const { components } = useComponentsStore();
   const { getAIContextPrompt } = useContextStore();
@@ -143,22 +173,27 @@ function AIPromptPanel() {
   // Fetch configured providers on mount
   useEffect(() => {
     const fetchProviders = async () => {
+      console.log('[Editor] 🔄 Fetching configured providers...');
       setIsLoadingProviders(true);
       try {
         const keys = await getApiKeys();
+        console.log('[Editor] 📋 Fetched API keys:', keys);
         setConfiguredProviders(keys);
 
-        // Auto-select active provider or first available
         const active = keys.find(k => k.isActive);
         if (active) {
+          console.log('[Editor] ✅ Found active provider:', active.provider, 'model:', active.model);
           setSelectedProvider(active.provider);
           setSelectedModel(active.model || PROVIDER_INFO[active.provider].defaultModel);
         } else if (keys.length > 0) {
+          console.log('[Editor] ⚠️ No active provider, using first:', keys[0].provider);
           setSelectedProvider(keys[0].provider);
           setSelectedModel(keys[0].model || PROVIDER_INFO[keys[0].provider].defaultModel);
+        } else {
+          console.log('[Editor] ❌ No API keys configured');
         }
       } catch (error) {
-        console.error('Failed to fetch providers:', error);
+        console.error('[Editor] ❌ Failed to fetch providers:', error);
       } finally {
         setIsLoadingProviders(false);
       }
@@ -176,14 +211,36 @@ function AIPromptPanel() {
   };
 
   const handleGenerate = async () => {
-    if (!prompt.trim()) return;
+    console.log('[Editor] ========================================');
+    console.log('[Editor] 🎬 handleGenerate called');
+    console.log('[Editor] 🎬 Prompt:', prompt);
+    console.log('[Editor] 🎬 Has providers:', hasProviders);
+    console.log('[Editor] 🎬 Selected provider:', selectedProvider);
+    console.log('[Editor] 🎬 Selected model:', selectedModel);
+    console.log('[Editor] 🎬 Generation mode:', generationMode);
+    console.log('[Editor] 🎬 Current HTML length:', currentHtml?.length);
+    console.log('[Editor] ========================================');
+
+    if (!prompt.trim()) {
+      console.log('[Editor] ❌ Empty prompt, aborting');
+      return;
+    }
     if (!hasProviders) {
+      console.log('[Editor] ❌ No providers configured, showing warning');
       message.warning('Please configure an API key in Settings first');
       return;
     }
 
+    // Reset state
     setGenerating(true);
     setGeneratedHtml(null);
+    setErrorMessage(null);
+
+    // Stage 1: Preparing
+    setGenerationStage('preparing');
+    setStageMessage('Preparing request...');
+    console.log('[Editor] 📋 Stage: Preparing');
+    await new Promise(r => setTimeout(r, 300));
 
     // Build enhanced prompt based on mode
     let enhancedPrompt = prompt;
@@ -192,6 +249,20 @@ function AIPromptPanel() {
     } else {
       enhancedPrompt = `Modify the page: ${prompt}`;
     }
+    console.log('[Editor] 📝 Enhanced prompt:', enhancedPrompt);
+
+    // Stage 2: Sending to AI
+    setGenerationStage('sending');
+    setStageMessage(`Sending to ${currentProviderInfo?.name || 'AI'}...`);
+    console.log('[Editor] 🚀 Stage: Sending to AI');
+
+    console.log('[Editor] 🚀 Calling generateHtml...');
+    console.log('[Editor] 🚀 Request:', {
+      prompt: enhancedPrompt,
+      currentHtmlLength: currentHtml?.length,
+      hasContext: !!productContext,
+      instruction: generationMode,
+    });
 
     const response = await generateHtml({
       prompt: enhancedPrompt,
@@ -200,48 +271,104 @@ function AIPromptPanel() {
       instruction: generationMode,
     });
 
+    console.log('[Editor] 📥 Response received:', {
+      success: response.success,
+      error: response.error,
+      htmlLength: response.html?.length,
+    });
+
+    // Stage 3: Processing
+    setGenerationStage('processing');
+    setStageMessage('Processing response...');
+    console.log('[Editor] ⚙️ Stage: Processing');
+    await new Promise(r => setTimeout(r, 300));
+
     if (response.success) {
+      console.log('[Editor] ✅ Generation successful, setting generated HTML');
       setGeneratedHtml(response.html);
+
+      // Add to version history
+      const newVersion: GenerationVersion = {
+        id: `v-${Date.now()}`,
+        prompt: prompt,
+        html: response.html,
+        timestamp: new Date(),
+        provider: selectedProvider || 'unknown',
+        model: selectedModel,
+      };
+      setVersions(prev => [...prev, newVersion]);
+      setCurrentVersionIndex(versions.length);
+
       addGenerationToHistory(prompt, false);
-      message.success('Generation complete!');
+
+      setGenerationStage('complete');
+      setStageMessage('Generation complete!');
+      console.log('[Editor] ✅ Stage: Complete');
     } else {
-      message.error(response.error || 'Generation failed');
-      // Fall back to mock for demo
+      console.log('[Editor] ❌ Generation failed:', response.error);
+      setErrorMessage(response.error || 'Generation failed');
+      setGenerationStage('error');
+      setStageMessage('Generation failed');
+
+      // Fall back to mock for demo if no providers
       if (!hasProviders) {
+        console.log('[Editor] 🔄 Falling back to mock response');
         setGeneratedHtml(getMockResponse(prompt));
         addGenerationToHistory(prompt, false);
+        setGenerationStage('complete');
       }
     }
 
     setGenerating(false);
+    console.log('[Editor] 🏁 handleGenerate complete');
   };
 
-  const handleApplyFullPage = () => {
+  const handleAcceptChanges = () => {
     if (!generatedHtml) return;
     updateHtml(generatedHtml);
     setGeneratedHtml(null);
     setPrompt('');
-    message.success('Changes applied to page!');
+    setGenerationStage('idle');
+    message.success('Changes applied!');
   };
 
-  const handleApplyAsComponent = () => {
-    if (!generatedHtml) return;
-
-    // Insert generated HTML into current page (at end of body)
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(currentHtml, 'text/html');
-
-    const wrapper = document.createElement('div');
-    wrapper.innerHTML = generatedHtml;
-    wrapper.style.cssText = 'margin: 20px; padding: 20px; border: 2px dashed #764ba2; border-radius: 8px;';
-    wrapper.setAttribute('data-voxel-generated', 'true');
-
-    doc.body.appendChild(wrapper);
-
-    updateHtml(doc.documentElement.outerHTML);
+  const handleRejectChanges = () => {
     setGeneratedHtml(null);
-    setPrompt('');
-    message.success('Component added to page!');
+    setGenerationStage('idle');
+    message.info('Changes discarded');
+  };
+
+  const handleRetry = () => {
+    setGeneratedHtml(null);
+    setErrorMessage(null);
+    setGenerationStage('idle');
+    handleGenerate();
+  };
+
+  // Navigate version history
+  const handlePreviousVersion = () => {
+    if (currentVersionIndex > 0) {
+      const prevIndex = currentVersionIndex - 1;
+      setCurrentVersionIndex(prevIndex);
+      setGeneratedHtml(versions[prevIndex].html);
+      setPrompt(versions[prevIndex].prompt);
+    }
+  };
+
+  const handleNextVersion = () => {
+    if (currentVersionIndex < versions.length - 1) {
+      const nextIndex = currentVersionIndex + 1;
+      setCurrentVersionIndex(nextIndex);
+      setGeneratedHtml(versions[nextIndex].html);
+      setPrompt(versions[nextIndex].prompt);
+    }
+  };
+
+  const handleRestoreVersion = (index: number) => {
+    setCurrentVersionIndex(index);
+    setGeneratedHtml(versions[index].html);
+    setPrompt(versions[index].prompt);
+    setGenerationStage('complete');
   };
 
   const handleUseSuggestion = (suggestion: string) => {
@@ -249,12 +376,17 @@ function AIPromptPanel() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ padding: 16, borderBottom: '1px solid #f0f0f0' }}>
+      <div style={{ padding: 16, borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <ThunderboltOutlined style={{ color: '#764ba2', fontSize: 18 }} />
           <Text strong style={{ fontSize: 16 }}>Vibe Coding</Text>
+          {versions.length > 0 && (
+            <Tag color="purple" style={{ marginLeft: 'auto' }}>
+              {versions.length} version{versions.length > 1 ? 's' : ''}
+            </Tag>
+          )}
         </div>
         <Text type="secondary" style={{ fontSize: 12 }}>
           Describe changes in natural language and AI will modify your screen
@@ -262,7 +394,7 @@ function AIPromptPanel() {
       </div>
 
       {/* Provider/Model Selection */}
-      <div style={{ padding: 16, borderBottom: '1px solid #f0f0f0' }}>
+      <div style={{ padding: 16, borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
         {isLoadingProviders ? (
           <div style={{ textAlign: 'center', padding: 12 }}>
             <Spin size="small" />
@@ -290,224 +422,336 @@ function AIPromptPanel() {
           />
         ) : (
           <Space direction="vertical" style={{ width: '100%' }} size={8}>
-            {/* Provider Select */}
-            <div>
-              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
-                <RobotOutlined /> Provider
-              </Text>
-              <Select
-                value={selectedProvider}
-                onChange={handleProviderChange}
-                style={{ width: '100%' }}
-                size="small"
-                options={configuredProviders.map(k => ({
-                  value: k.provider,
-                  label: (
-                    <Space>
-                      <span>{PROVIDER_INFO[k.provider].name}</span>
-                      {k.isActive && <Tag color="green" style={{ margin: 0, fontSize: 10 }}>Active</Tag>}
-                    </Space>
-                  ),
-                }))}
-              />
-            </div>
-
-            {/* Model Select */}
-            {selectedProvider && currentProviderInfo && (
-              <div>
-                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Model</Text>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
+                  <RobotOutlined /> Provider
+                </Text>
                 <Select
-                  value={selectedModel}
-                  onChange={setSelectedModel}
+                  value={selectedProvider}
+                  onChange={handleProviderChange}
                   style={{ width: '100%' }}
                   size="small"
-                  showSearch
-                  options={currentProviderInfo.models.map(model => ({
-                    value: model,
-                    label: model,
+                  options={configuredProviders.map(k => ({
+                    value: k.provider,
+                    label: PROVIDER_INFO[k.provider].name,
                   }))}
                 />
               </div>
-            )}
-
-            {/* Connection Status */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
-              <Text type="success" style={{ fontSize: 11 }}>
-                Connected to {currentProviderInfo?.name}
-              </Text>
+              {selectedProvider && currentProviderInfo && (
+                <div style={{ flex: 1 }}>
+                  <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>Model</Text>
+                  <Select
+                    value={selectedModel}
+                    onChange={setSelectedModel}
+                    style={{ width: '100%' }}
+                    size="small"
+                    options={currentProviderInfo.models.slice(0, 5).map(model => ({
+                      value: model,
+                      label: model.split('-').slice(-1)[0], // Shorten model name
+                    }))}
+                  />
+                </div>
+              )}
             </div>
           </Space>
         )}
       </div>
 
-      {/* Prompt Section */}
-      <div style={{ padding: 16, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        {/* Mode Selection */}
-        <div style={{ marginBottom: 12 }}>
-          <Segmented
+      {/* Progress Steps - Show during generation */}
+      {generationStage !== 'idle' && (
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa', flexShrink: 0 }}>
+          <Steps
             size="small"
-            value={generationMode}
-            onChange={(v) => setGenerationMode(v as 'modify' | 'add')}
-            options={[
-              { value: 'modify', label: 'Modify Page' },
-              { value: 'add', label: 'Add Component' },
+            current={['preparing', 'sending', 'processing', 'complete'].indexOf(generationStage)}
+            status={generationStage === 'error' ? 'error' : undefined}
+            items={[
+              { title: 'Prepare', icon: <CodeOutlined /> },
+              { title: 'Send', icon: <CloudOutlined /> },
+              { title: 'Process', icon: <ExperimentOutlined /> },
+              { title: 'Done', icon: generationStage === 'error' ? <CloseCircleOutlined /> : <CheckOutlined /> },
             ]}
-            block
           />
-        </div>
-
-        {/* Prompt Input */}
-        <TextArea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder={
-            generationMode === 'modify'
-              ? "E.g., Change the header to be dark with white text..."
-              : "E.g., Add a testimonial section with 3 customer reviews..."
-          }
-          autoSize={{ minRows: 4, maxRows: 8 }}
-          style={{ marginBottom: 12 }}
-          onPressEnter={(e) => {
-            if (e.ctrlKey || e.metaKey) {
-              handleGenerate();
-            }
-          }}
-        />
-
-        {/* Generate Button */}
-        <Button
-          type="primary"
-          icon={isGenerating ? <Spin size="small" /> : <ThunderboltOutlined />}
-          onClick={handleGenerate}
-          disabled={!prompt.trim() || isGenerating || !hasProviders}
-          block
-          size="large"
-          style={{ background: hasProviders ? '#764ba2' : undefined }}
-        >
-          {isGenerating ? 'Generating...' : 'Generate with AI'}
-        </Button>
-
-        {/* Keyboard shortcut hint */}
-        <Text type="secondary" style={{ fontSize: 10, textAlign: 'center', marginTop: 8 }}>
-          Press Ctrl/⌘ + Enter to generate
-        </Text>
-
-        {/* Suggestions */}
-        <div style={{ marginTop: 16 }}>
-          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
-            <BulbOutlined /> Quick suggestions
-          </Text>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {PROMPT_SUGGESTIONS.slice(0, 6).map((suggestion) => (
-              <Tag
-                key={suggestion}
-                style={{ cursor: 'pointer', fontSize: 10 }}
-                onClick={() => handleUseSuggestion(suggestion)}
-              >
-                {suggestion}
-              </Tag>
-            ))}
+          <div style={{ textAlign: 'center', marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>{stageMessage}</Text>
           </div>
-        </div>
-      </div>
-
-      {/* Generated Preview */}
-      {generatedHtml && (
-        <div style={{ borderTop: '1px solid #f0f0f0', padding: 16, background: '#fafafa' }}>
-          <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-            <ExperimentOutlined /> Preview
-          </Text>
-          <div
-            style={{
-              background: 'white',
-              padding: 12,
-              borderRadius: 8,
-              marginBottom: 12,
-              border: '1px solid #e8e8e8',
-              maxHeight: 200,
-              overflow: 'auto',
-            }}
-          >
-            <iframe
-              srcDoc={generatedHtml}
-              style={{ width: '100%', height: 150, border: 'none', pointerEvents: 'none' }}
-              title="Preview"
-            />
-          </div>
-          <Space style={{ width: '100%' }} direction="vertical" size={8}>
-            <Button type="primary" block onClick={handleApplyFullPage}>
-              Apply as Full Page
-            </Button>
-            <Button block onClick={handleApplyAsComponent}>
-              Insert as Component
-            </Button>
-            <Button block onClick={() => setGeneratedHtml(null)}>
-              Discard
-            </Button>
-          </Space>
+          {generationStage === 'sending' && (
+            <Progress percent={100} status="active" showInfo={false} size="small" style={{ marginTop: 8 }} />
+          )}
         </div>
       )}
 
-      <Divider style={{ margin: '12px 0 0 0' }} />
-
-      {/* Component Library Quick Access */}
-      <div style={{ padding: 16, flex: '0 0 auto', maxHeight: 200, overflow: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <AppstoreOutlined />
-          <Text strong style={{ fontSize: 12 }}>Component Library</Text>
+      {/* Error Message */}
+      {errorMessage && (
+        <div style={{ padding: 16, flexShrink: 0 }}>
+          <Alert
+            type="error"
+            message="Generation Failed"
+            description={errorMessage}
+            showIcon
+            action={
+              <Button size="small" onClick={handleRetry}>
+                Retry
+              </Button>
+            }
+          />
         </div>
-        {components.length === 0 ? (
-          <Text type="secondary" style={{ fontSize: 11 }}>No components saved yet</Text>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {components.slice(0, 4).map((comp) => (
-              <Card
-                key={comp.id}
-                size="small"
-                hoverable
-                style={{ cursor: 'pointer' }}
-                onClick={() => {
-                  const combined = `<style>${comp.css}</style>${comp.html}`;
-                  setGeneratedHtml(combined);
-                }}
-              >
-                <Text ellipsis style={{ fontSize: 12 }}>
-                  {comp.name}
-                </Text>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
 
-      {/* Generation History */}
-      {generationHistory.length > 0 && (
+      {/* Prompt Section - Hidden during preview */}
+      {!generatedHtml && generationStage !== 'complete' && (
+        <div style={{ padding: 16, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'auto' }}>
+          {/* Mode Selection */}
+          <div style={{ marginBottom: 12 }}>
+            <Segmented
+              size="small"
+              value={generationMode}
+              onChange={(v) => setGenerationMode(v as 'modify' | 'add')}
+              options={[
+                { value: 'modify', label: 'Modify Page' },
+                { value: 'add', label: 'Add Component' },
+              ]}
+              block
+            />
+          </div>
+
+          {/* Prompt Input */}
+          <TextArea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={
+              generationMode === 'modify'
+                ? "E.g., Change the header to be dark with white text..."
+                : "E.g., Add a testimonial section with 3 customer reviews..."
+            }
+            autoSize={{ minRows: 3, maxRows: 6 }}
+            style={{ marginBottom: 12 }}
+            disabled={isGenerating}
+            onPressEnter={(e) => {
+              if (e.ctrlKey || e.metaKey) {
+                handleGenerate();
+              }
+            }}
+          />
+
+          {/* Generate Button */}
+          <Button
+            type="primary"
+            icon={isGenerating ? <Spin size="small" /> : <ThunderboltOutlined />}
+            onClick={handleGenerate}
+            disabled={!prompt.trim() || isGenerating || !hasProviders}
+            block
+            size="large"
+            style={{ background: hasProviders && !isGenerating ? '#764ba2' : undefined }}
+          >
+            {isGenerating ? 'Generating...' : 'Generate with AI'}
+          </Button>
+
+          <Text type="secondary" style={{ fontSize: 10, textAlign: 'center', marginTop: 8 }}>
+            Ctrl/⌘ + Enter to generate
+          </Text>
+
+          {/* Suggestions */}
+          <div style={{ marginTop: 16 }}>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
+              <BulbOutlined /> Quick suggestions
+            </Text>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {PROMPT_SUGGESTIONS.slice(0, 6).map((suggestion) => (
+                <Tag
+                  key={suggestion}
+                  style={{ cursor: 'pointer', fontSize: 10 }}
+                  onClick={() => handleUseSuggestion(suggestion)}
+                >
+                  {suggestion}
+                </Tag>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Generated Preview with Validation */}
+      {generatedHtml && (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Preview Header with Version Navigation */}
+          <div style={{ padding: '8px 16px', background: '#f0f0f0', borderBottom: '1px solid #e8e8e8', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <EyeOutlined />
+            <Text strong style={{ fontSize: 12 }}>Preview Changes</Text>
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+              {versions.length > 1 && (
+                <>
+                  <Tooltip title="Previous version">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<LeftOutlined />}
+                      onClick={handlePreviousVersion}
+                      disabled={currentVersionIndex <= 0}
+                    />
+                  </Tooltip>
+                  <Text style={{ fontSize: 11 }}>
+                    {currentVersionIndex + 1} / {versions.length}
+                  </Text>
+                  <Tooltip title="Next version">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<RightOutlined />}
+                      onClick={handleNextVersion}
+                      disabled={currentVersionIndex >= versions.length - 1}
+                    />
+                  </Tooltip>
+                </>
+              )}
+              <Tooltip title={showCompare ? 'Hide comparison' : 'Compare with original'}>
+                <Button
+                  type={showCompare ? 'primary' : 'text'}
+                  size="small"
+                  icon={<SwapOutlined />}
+                  onClick={() => setShowCompare(!showCompare)}
+                />
+              </Tooltip>
+            </div>
+          </div>
+
+          {/* Prompt used */}
+          <div style={{ padding: '8px 16px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
+            <Text type="secondary" style={{ fontSize: 10 }}>Prompt: </Text>
+            <Text style={{ fontSize: 11 }}>{prompt}</Text>
+          </div>
+
+          {/* Preview Content */}
+          <div style={{ flex: 1, overflow: 'auto', display: 'flex' }}>
+            {showCompare ? (
+              // Side by side comparison
+              <div style={{ display: 'flex', flex: 1 }}>
+                <div style={{ flex: 1, borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ padding: '4px 8px', background: '#fff1f0', textAlign: 'center', flexShrink: 0 }}>
+                    <Text type="secondary" style={{ fontSize: 10 }}>Original</Text>
+                  </div>
+                  <iframe
+                    srcDoc={currentHtml}
+                    style={{ flex: 1, border: 'none', width: '100%' }}
+                    title="Original"
+                  />
+                </div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ padding: '4px 8px', background: '#f6ffed', textAlign: 'center', flexShrink: 0 }}>
+                    <Text type="secondary" style={{ fontSize: 10 }}>Generated</Text>
+                  </div>
+                  <iframe
+                    srcDoc={generatedHtml}
+                    style={{ flex: 1, border: 'none', width: '100%' }}
+                    title="Generated"
+                  />
+                </div>
+              </div>
+            ) : (
+              // Single preview
+              <iframe
+                srcDoc={generatedHtml}
+                style={{ flex: 1, border: 'none', width: '100%' }}
+                title="Preview"
+              />
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div style={{ padding: 12, borderTop: '1px solid #f0f0f0', display: 'flex', gap: 8, flexShrink: 0 }}>
+            <Button
+              type="primary"
+              icon={<CheckOutlined />}
+              onClick={handleAcceptChanges}
+              style={{ flex: 1, background: '#52c41a', borderColor: '#52c41a' }}
+            >
+              Accept
+            </Button>
+            <Button
+              danger
+              icon={<CloseCircleOutlined />}
+              onClick={handleRejectChanges}
+              style={{ flex: 1 }}
+            >
+              Reject
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Version History Drawer */}
+      {!generatedHtml && versions.length > 0 && (
         <>
           <Divider style={{ margin: 0 }} />
-          <div style={{ padding: 16 }}>
+          <div style={{ padding: 12, maxHeight: 150, overflow: 'auto', flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <HistoryOutlined />
-              <Text strong style={{ fontSize: 12 }}>Recent Prompts</Text>
+              <Text strong style={{ fontSize: 12 }}>Version History</Text>
             </div>
-            <div style={{ maxHeight: 100, overflow: 'auto' }}>
-              {generationHistory.slice(-5).reverse().map((item, i) => (
-                <div
-                  key={i}
-                  style={{
-                    fontSize: 11,
-                    padding: '6px 8px',
-                    background: '#f6f6f6',
-                    borderRadius: 4,
-                    marginBottom: 4,
-                    cursor: 'pointer',
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {versions.slice().reverse().map((version, idx) => {
+                const actualIndex = versions.length - 1 - idx;
+                return (
+                  <div
+                    key={version.id}
+                    style={{
+                      padding: '6px 8px',
+                      background: actualIndex === currentVersionIndex ? '#e6f7ff' : '#f6f6f6',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      border: actualIndex === currentVersionIndex ? '1px solid #91d5ff' : '1px solid transparent',
+                    }}
+                    onClick={() => handleRestoreVersion(actualIndex)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text ellipsis style={{ fontSize: 11, flex: 1 }}>
+                        {version.prompt}
+                      </Text>
+                      <Tooltip title="Restore this version">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<RollbackOutlined />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRestoreVersion(actualIndex);
+                          }}
+                        />
+                      </Tooltip>
+                    </div>
+                    <Text type="secondary" style={{ fontSize: 9 }}>
+                      {version.timestamp.toLocaleTimeString()} · {version.model.split('-').slice(-1)[0]}
+                    </Text>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Component Library - collapsed when preview is shown */}
+      {!generatedHtml && components.length > 0 && (
+        <>
+          <Divider style={{ margin: 0 }} />
+          <div style={{ padding: 12, maxHeight: 120, overflow: 'auto', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <AppstoreOutlined />
+              <Text strong style={{ fontSize: 12 }}>Components</Text>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {components.slice(0, 6).map((comp) => (
+                <Tag
+                  key={comp.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    const combined = `<style>${comp.css}</style>${comp.html}`;
+                    setGeneratedHtml(combined);
+                    setGenerationStage('complete');
                   }}
-                  onClick={() => setPrompt(item.prompt)}
                 >
-                  <Text ellipsis style={{ display: 'block' }}>
-                    {item.prompt}
-                  </Text>
-                </div>
+                  {comp.name}
+                </Tag>
               ))}
             </div>
           </div>

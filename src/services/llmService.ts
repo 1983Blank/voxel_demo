@@ -61,11 +61,14 @@ When modifying:
  * This is an async function that fetches the decrypted key from Supabase
  */
 export async function getLLMConfigAsync(): Promise<LLMConfig | null> {
+  console.log('[LLM] 🔍 getLLMConfigAsync: Starting to fetch LLM configuration...');
+
   // Check environment variables first (for production/testing)
   const envApiKey = import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.VITE_OPENAI_API_KEY;
   const envProvider: LLMProvider = import.meta.env.VITE_ANTHROPIC_API_KEY ? 'anthropic' : 'openai';
 
   if (envApiKey) {
+    console.log('[LLM] ✅ Found API key in environment variables:', { provider: envProvider, keyLength: envApiKey.length });
     return {
       provider: envProvider,
       apiKey: envApiKey,
@@ -73,26 +76,39 @@ export async function getLLMConfigAsync(): Promise<LLMConfig | null> {
     };
   }
 
+  console.log('[LLM] 📡 No env vars, checking Supabase for active provider...');
+
   // Get active provider from Supabase
   const activeProvider = await getActiveProvider();
+  console.log('[LLM] 📡 getActiveProvider result:', activeProvider);
+
   if (!activeProvider) {
+    console.log('[LLM] ❌ No active provider found in Supabase');
     return null;
   }
 
   // Get the decrypted API key from Supabase Vault
+  console.log('[LLM] 🔐 Fetching decrypted API key for provider:', activeProvider);
   const apiKey = await getDecryptedApiKey(activeProvider);
+  console.log('[LLM] 🔐 getDecryptedApiKey result:', apiKey ? `Key found (${apiKey.length} chars, starts with ${apiKey.substring(0, 10)}...)` : 'null');
+
   if (!apiKey) {
+    console.log('[LLM] ❌ No API key found for provider:', activeProvider);
     return null;
   }
 
   // Get the model configuration
   const keyConfig = await getActiveKeyConfig(activeProvider);
+  console.log('[LLM] ⚙️ getActiveKeyConfig result:', keyConfig);
 
-  return {
+  const config = {
     provider: activeProvider,
     apiKey,
     model: keyConfig?.model || DEFAULT_MODELS[activeProvider],
   };
+
+  console.log('[LLM] ✅ Final LLM config:', { provider: config.provider, model: config.model, keyLength: config.apiKey.length });
+  return config;
 }
 
 /**
@@ -168,7 +184,26 @@ async function generateWithAnthropic(
   config: LLMConfig,
   request: GenerationRequest
 ): Promise<GenerationResponse> {
+  console.log('[LLM] 🤖 generateWithAnthropic: Starting Anthropic API call...');
+  console.log('[LLM] 🤖 Model:', config.model || DEFAULT_MODELS.anthropic);
+  console.log('[LLM] 🤖 System prompt:', SYSTEM_PROMPT);
+
   const userMessage = buildUserMessage(request);
+
+  const requestBody = {
+    model: config.model || DEFAULT_MODELS.anthropic,
+    max_tokens: 8192,
+    system: SYSTEM_PROMPT,
+    messages: [
+      {
+        role: 'user',
+        content: userMessage,
+      },
+    ],
+  };
+
+  console.log('[LLM] 🚀 Sending request to Anthropic API...');
+  console.log('[LLM] 🚀 Request body (truncated):', JSON.stringify({ ...requestBody, messages: [{ role: 'user', content: userMessage.substring(0, 200) + '...' }] }, null, 2));
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -179,32 +214,33 @@ async function generateWithAnthropic(
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({
-        model: config.model || DEFAULT_MODELS.anthropic,
-        max_tokens: 8192,
-        system: SYSTEM_PROMPT,
-        messages: [
-          {
-            role: 'user',
-            content: userMessage,
-          },
-        ],
-      }),
+      body: JSON.stringify(requestBody),
     });
+
+    console.log('[LLM] 📥 Response status:', response.status, response.statusText);
 
     if (!response.ok) {
       const error = await response.json();
+      console.log('[LLM] ❌ API Error response:', error);
       throw new Error(error.error?.message || 'Anthropic API error');
     }
 
     const data = await response.json();
+    console.log('[LLM] ✅ API Success! Response structure:', Object.keys(data));
+    console.log('[LLM] ✅ Content type:', data.content?.[0]?.type);
+    console.log('[LLM] ✅ Response text length:', data.content?.[0]?.text?.length || 0);
+    console.log('[LLM] ✅ Response preview:', (data.content?.[0]?.text || '').substring(0, 500) + '...');
+
     const html = data.content[0]?.text || '';
+    const cleanedHtml = cleanHtmlResponse(html);
+    console.log('[LLM] ✅ Cleaned HTML length:', cleanedHtml.length);
 
     return {
-      html: cleanHtmlResponse(html),
+      html: cleanedHtml,
       success: true,
     };
   } catch (error) {
+    console.log('[LLM] ❌ Exception caught:', error);
     return {
       html: request.currentHtml,
       success: false,
@@ -220,7 +256,13 @@ async function generateWithOpenAI(
   config: LLMConfig,
   request: GenerationRequest
 ): Promise<GenerationResponse> {
+  console.log('[LLM] 🤖 generateWithOpenAI: Starting OpenAI API call...');
+  console.log('[LLM] 🤖 Model:', config.model || DEFAULT_MODELS.openai);
+  console.log('[LLM] 🤖 System prompt:', SYSTEM_PROMPT);
+
   const userMessage = buildUserMessage(request);
+
+  console.log('[LLM] 🚀 Sending request to OpenAI API...');
 
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -245,19 +287,29 @@ async function generateWithOpenAI(
       }),
     });
 
+    console.log('[LLM] 📥 Response status:', response.status, response.statusText);
+
     if (!response.ok) {
       const error = await response.json();
+      console.log('[LLM] ❌ API Error response:', error);
       throw new Error(error.error?.message || 'OpenAI API error');
     }
 
     const data = await response.json();
+    console.log('[LLM] ✅ API Success! Response structure:', Object.keys(data));
+    console.log('[LLM] ✅ Response text length:', data.choices?.[0]?.message?.content?.length || 0);
+    console.log('[LLM] ✅ Response preview:', (data.choices?.[0]?.message?.content || '').substring(0, 500) + '...');
+
     const html = data.choices[0]?.message?.content || '';
+    const cleanedHtml = cleanHtmlResponse(html);
+    console.log('[LLM] ✅ Cleaned HTML length:', cleanedHtml.length);
 
     return {
-      html: cleanHtmlResponse(html),
+      html: cleanedHtml,
       success: true,
     };
   } catch (error) {
+    console.log('[LLM] ❌ Exception caught:', error);
     return {
       html: request.currentHtml,
       success: false,
@@ -270,6 +322,12 @@ async function generateWithOpenAI(
  * Build user message for LLM
  */
 function buildUserMessage(request: GenerationRequest): string {
+  console.log('[LLM] 📝 Building user message...');
+  console.log('[LLM] 📝 User prompt:', request.prompt);
+  console.log('[LLM] 📝 Has context:', !!request.context);
+  console.log('[LLM] 📝 Current HTML length:', request.currentHtml.length, 'chars');
+  console.log('[LLM] 📝 Current HTML preview:', request.currentHtml.substring(0, 500) + '...');
+
   let message = `User Request: ${request.prompt}\n\n`;
 
   if (request.context) {
@@ -279,6 +337,7 @@ function buildUserMessage(request: GenerationRequest): string {
   message += `Current HTML:\n\`\`\`html\n${request.currentHtml}\n\`\`\`\n\n`;
   message += `Please modify the HTML according to the user request. Return ONLY the complete modified HTML document.`;
 
+  console.log('[LLM] 📝 Final message length:', message.length, 'chars');
   return message;
 }
 
@@ -289,7 +348,12 @@ async function generateWithGoogle(
   config: LLMConfig,
   request: GenerationRequest
 ): Promise<GenerationResponse> {
+  console.log('[LLM] 🤖 generateWithGoogle: Starting Google Gemini API call...');
+  console.log('[LLM] 🤖 Model:', config.model || DEFAULT_MODELS.google);
+
   const userMessage = buildUserMessage(request);
+
+  console.log('[LLM] 🚀 Sending request to Google AI API...');
 
   try {
     const response = await fetch(
@@ -314,19 +378,29 @@ async function generateWithGoogle(
       }
     );
 
+    console.log('[LLM] 📥 Response status:', response.status, response.statusText);
+
     if (!response.ok) {
       const error = await response.json();
+      console.log('[LLM] ❌ API Error response:', error);
       throw new Error(error.error?.message || 'Google AI API error');
     }
 
     const data = await response.json();
+    console.log('[LLM] ✅ API Success! Response structure:', Object.keys(data));
+    console.log('[LLM] ✅ Response text length:', data.candidates?.[0]?.content?.parts?.[0]?.text?.length || 0);
+    console.log('[LLM] ✅ Response preview:', (data.candidates?.[0]?.content?.parts?.[0]?.text || '').substring(0, 500) + '...');
+
     const html = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const cleanedHtml = cleanHtmlResponse(html);
+    console.log('[LLM] ✅ Cleaned HTML length:', cleanedHtml.length);
 
     return {
-      html: cleanHtmlResponse(html),
+      html: cleanedHtml,
       success: true,
     };
   } catch (error) {
+    console.log('[LLM] ❌ Exception caught:', error);
     return {
       html: request.currentHtml,
       success: false,
@@ -361,10 +435,19 @@ function cleanHtmlResponse(html: string): string {
 export async function generateHtml(
   request: GenerationRequest
 ): Promise<GenerationResponse> {
+  console.log('[LLM] ========================================');
+  console.log('[LLM] 🎯 generateHtml: Starting generation...');
+  console.log('[LLM] 🎯 Request prompt:', request.prompt);
+  console.log('[LLM] 🎯 Request instruction:', request.instruction);
+  console.log('[LLM] 🎯 Has context:', !!request.context);
+  console.log('[LLM] 🎯 Current HTML length:', request.currentHtml.length);
+  console.log('[LLM] ========================================');
+
   // Use async version to get the latest config from Supabase
   const config = await getLLMConfigAsync();
 
   if (!config) {
+    console.log('[LLM] ❌ No LLM config found - aborting generation');
     return {
       html: request.currentHtml,
       success: false,
@@ -372,20 +455,37 @@ export async function generateHtml(
     };
   }
 
+  console.log('[LLM] 🔀 Routing to provider:', config.provider);
+
+  let result: GenerationResponse;
+
   switch (config.provider) {
     case 'anthropic':
-      return generateWithAnthropic(config, request);
+      result = await generateWithAnthropic(config, request);
+      break;
     case 'openai':
-      return generateWithOpenAI(config, request);
+      result = await generateWithOpenAI(config, request);
+      break;
     case 'google':
-      return generateWithGoogle(config, request);
+      result = await generateWithGoogle(config, request);
+      break;
     default:
-      return {
+      console.log('[LLM] ❌ Unsupported provider:', config.provider);
+      result = {
         html: request.currentHtml,
         success: false,
         error: `Unsupported provider: ${config.provider}`,
       };
   }
+
+  console.log('[LLM] ========================================');
+  console.log('[LLM] 🏁 Generation complete!');
+  console.log('[LLM] 🏁 Success:', result.success);
+  console.log('[LLM] 🏁 Error:', result.error || 'none');
+  console.log('[LLM] 🏁 Result HTML length:', result.html.length);
+  console.log('[LLM] ========================================');
+
+  return result;
 }
 
 /**
