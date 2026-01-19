@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { CapturedScreen, ScreenVersion } from '@/types';
+import { supabase, isSupabaseConfigured } from '@/services/supabase';
 
-// Static list of captured screens from mock-captures folder
+// Static list of captured screens from mock-captures folder (for demo/offline)
 const MOCK_SCREENS: CapturedScreen[] = [
   {
     id: 'screen-1',
@@ -52,24 +53,28 @@ interface ScreensState {
   previewScreen: CapturedScreen | null;
   isPreviewOpen: boolean;
   isInitialized: boolean;
+  isLoading: boolean;
+  isSyncing: boolean;
 
   // Actions
-  initializeScreens: () => void;
+  initializeScreens: () => Promise<void>;
+  fetchFromSupabase: () => Promise<void>;
   setScreens: (screens: CapturedScreen[]) => void;
   addScreen: (screen: CapturedScreen) => void;
-  removeScreen: (id: string) => void;
-  duplicateScreen: (id: string) => void;
+  uploadScreen: (file: File, name?: string, tags?: string[]) => Promise<CapturedScreen | null>;
+  removeScreen: (id: string) => Promise<void>;
+  duplicateScreen: (id: string) => Promise<void>;
   selectScreen: (screen: CapturedScreen | null) => void;
   openPreview: (screen: CapturedScreen) => void;
   closePreview: () => void;
-  updateScreen: (id: string, updates: Partial<CapturedScreen>) => void;
+  updateScreen: (id: string, updates: Partial<CapturedScreen>) => Promise<void>;
 
   // Version management
   saveScreenVersion: (
     screenId: string,
     html: string,
     options?: { prompt?: string; description?: string }
-  ) => ScreenVersion;
+  ) => Promise<ScreenVersion>;
   getScreenVersions: (screenId: string) => ScreenVersion[];
   restoreVersion: (screenId: string, versionId: string) => void;
   getScreenHtml: (screenId: string) => string | null;
@@ -88,64 +93,222 @@ export const useScreensStore = create<ScreensState>()(
       previewScreen: null,
       isPreviewOpen: false,
       isInitialized: false,
+      isLoading: false,
+      isSyncing: false,
 
-      initializeScreens: () => {
+      initializeScreens: async () => {
         const state = get();
-        if (!state.isInitialized || state.screens.length === 0) {
-          // Merge mock screens with any persisted edits
-          const existingScreens = state.screens;
-          const mergedScreens = MOCK_SCREENS.map((mockScreen) => {
-            const existing = existingScreens.find((s) => s.id === mockScreen.id);
-            if (existing) {
-              // Preserve edited content and versions
-              return {
-                ...mockScreen,
-                editedHtml: existing.editedHtml,
-                versions: existing.versions,
-                currentVersionId: existing.currentVersionId,
-                updatedAt: existing.updatedAt,
-              };
-            }
-            return mockScreen;
-          });
+        if (state.isInitialized) return;
 
-          // Add any custom screens that aren't in mock
-          const customScreens = existingScreens.filter(
-            (s) => !MOCK_SCREENS.find((m) => m.id === s.id)
-          );
+        set({ isLoading: true });
 
-          set({
-            screens: [...mergedScreens, ...customScreens],
-            isInitialized: true,
-          });
+        // Try to fetch from Supabase first
+        if (isSupabaseConfigured()) {
+          try {
+            await get().fetchFromSupabase();
+            set({ isInitialized: true, isLoading: false });
+            return;
+          } catch (error) {
+            console.error('Failed to fetch from Supabase, using local data:', error);
+          }
+        }
+
+        // Fallback to mock screens + local storage
+        const existingScreens = state.screens;
+        const mergedScreens = MOCK_SCREENS.map((mockScreen) => {
+          const existing = existingScreens.find((s) => s.id === mockScreen.id);
+          if (existing) {
+            return {
+              ...mockScreen,
+              editedHtml: existing.editedHtml,
+              versions: existing.versions,
+              currentVersionId: existing.currentVersionId,
+              updatedAt: existing.updatedAt,
+            };
+          }
+          return mockScreen;
+        });
+
+        const customScreens = existingScreens.filter(
+          (s) => !MOCK_SCREENS.find((m) => m.id === s.id)
+        );
+
+        set({
+          screens: [...mergedScreens, ...customScreens],
+          isInitialized: true,
+          isLoading: false,
+        });
+      },
+
+      fetchFromSupabase: async () => {
+        if (!isSupabaseConfigured()) return;
+
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          // Not logged in, use mock screens
+          set({ screens: MOCK_SCREENS });
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('screens')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Error fetching screens:', error);
+          throw error;
+        }
+
+        // Map Supabase data to CapturedScreen format
+        const screens: CapturedScreen[] = (data || []).map((row) => ({
+          id: row.id,
+          name: row.name,
+          fileName: row.file_name,
+          filePath: row.file_path || '',
+          capturedAt: row.created_at,
+          thumbnail: row.thumbnail || undefined,
+          tags: row.tags || [],
+          editedHtml: row.html || undefined,
+          updatedAt: row.updated_at,
+        }));
+
+        // If no screens in DB, show mock screens
+        if (screens.length === 0) {
+          set({ screens: MOCK_SCREENS });
+        } else {
+          set({ screens });
         }
       },
 
       setScreens: (screens) => set({ screens }),
 
       addScreen: (screen) =>
-        set((state) => ({ screens: [...state.screens, screen] })),
+        set((state) => ({ screens: [screen, ...state.screens] })),
 
-      removeScreen: (id) =>
+      uploadScreen: async (file: File, name?: string, tags?: string[]) => {
+        const screenName = name || file.name.replace(/\.html?$/i, '');
+
+        // Read file content
+        const html = await file.text();
+
+        const newScreen: CapturedScreen = {
+          id: `screen-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          name: screenName,
+          fileName: file.name,
+          filePath: '',
+          capturedAt: new Date().toISOString(),
+          tags: tags || [],
+          editedHtml: html,
+          versions: [{
+            id: `version-${Date.now()}`,
+            html,
+            createdAt: new Date().toISOString(),
+            description: 'Initial upload',
+          }],
+        };
+
+        // Save to Supabase if configured
+        if (isSupabaseConfigured()) {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              const { data, error } = await supabase
+                .from('screens')
+                .insert({
+                  user_id: user.id,
+                  name: screenName,
+                  file_name: file.name,
+                  html: html,
+                  tags: tags || [],
+                })
+                .select()
+                .single();
+
+              if (error) {
+                console.error('Error saving to Supabase:', error);
+              } else if (data) {
+                // Update newScreen with Supabase ID
+                newScreen.id = data.id;
+                newScreen.capturedAt = data.created_at;
+
+                // Also create initial version in Supabase
+                await supabase.from('screen_versions').insert({
+                  screen_id: data.id,
+                  html: html,
+                  description: 'Initial upload',
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Supabase upload error:', error);
+          }
+        }
+
+        // Add to local state
+        set((state) => ({ screens: [newScreen, ...state.screens] }));
+
+        return newScreen;
+      },
+
+      removeScreen: async (id) => {
+        // Remove from Supabase if configured
+        if (isSupabaseConfigured()) {
+          try {
+            await supabase.from('screens').delete().eq('id', id);
+          } catch (error) {
+            console.error('Error deleting from Supabase:', error);
+          }
+        }
+
         set((state) => ({
           screens: state.screens.filter((s) => s.id !== id),
           selectedScreen: state.selectedScreen?.id === id ? null : state.selectedScreen,
-        })),
+        }));
+      },
 
-      duplicateScreen: (id) => {
+      duplicateScreen: async (id) => {
         const state = get();
         const screen = state.screens.find((s) => s.id === id);
-        if (screen) {
-          const newScreen: CapturedScreen = {
-            ...screen,
-            id: `screen-${Date.now()}`,
-            name: `${screen.name} (Copy)`,
-            capturedAt: new Date().toISOString(),
-            versions: [], // Start fresh version history
-            currentVersionId: undefined,
-          };
-          set({ screens: [...state.screens, newScreen] });
+        if (!screen) return;
+
+        const newScreen: CapturedScreen = {
+          ...screen,
+          id: `screen-${Date.now()}`,
+          name: `${screen.name} (Copy)`,
+          capturedAt: new Date().toISOString(),
+          versions: [],
+          currentVersionId: undefined,
+        };
+
+        // Save to Supabase if configured
+        if (isSupabaseConfigured()) {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              const { data, error } = await supabase
+                .from('screens')
+                .insert({
+                  user_id: user.id,
+                  name: newScreen.name,
+                  file_name: screen.fileName,
+                  html: screen.editedHtml || null,
+                  tags: screen.tags || [],
+                })
+                .select()
+                .single();
+
+              if (!error && data) {
+                newScreen.id = data.id;
+                newScreen.capturedAt = data.created_at;
+              }
+            }
+          } catch (error) {
+            console.error('Error duplicating in Supabase:', error);
+          }
         }
+
+        set({ screens: [...state.screens, newScreen] });
       },
 
       selectScreen: (screen) => set({ selectedScreen: screen }),
@@ -154,14 +317,31 @@ export const useScreensStore = create<ScreensState>()(
 
       closePreview: () => set({ previewScreen: null, isPreviewOpen: false }),
 
-      updateScreen: (id, updates) =>
+      updateScreen: async (id, updates) => {
+        // Update in Supabase if configured
+        if (isSupabaseConfigured()) {
+          try {
+            const supabaseUpdates: Record<string, unknown> = {};
+            if (updates.name) supabaseUpdates.name = updates.name;
+            if (updates.editedHtml) supabaseUpdates.html = updates.editedHtml;
+            if (updates.tags) supabaseUpdates.tags = updates.tags;
+
+            if (Object.keys(supabaseUpdates).length > 0) {
+              await supabase.from('screens').update(supabaseUpdates).eq('id', id);
+            }
+          } catch (error) {
+            console.error('Error updating in Supabase:', error);
+          }
+        }
+
         set((state) => ({
           screens: state.screens.map((s) =>
             s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s
           ),
-        })),
+        }));
+      },
 
-      saveScreenVersion: (screenId, html, options = {}) => {
+      saveScreenVersion: async (screenId, html, options = {}) => {
         const now = new Date().toISOString();
         const version: ScreenVersion = {
           id: `version-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -170,6 +350,34 @@ export const useScreensStore = create<ScreensState>()(
           prompt: options.prompt,
           description: options.description,
         };
+
+        // Save to Supabase if configured
+        if (isSupabaseConfigured()) {
+          try {
+            const { data, error } = await supabase
+              .from('screen_versions')
+              .insert({
+                screen_id: screenId,
+                html,
+                prompt: options.prompt || null,
+                description: options.description || null,
+              })
+              .select()
+              .single();
+
+            if (!error && data) {
+              version.id = data.id;
+            }
+
+            // Also update the screen's html
+            await supabase
+              .from('screens')
+              .update({ html })
+              .eq('id', screenId);
+          } catch (error) {
+            console.error('Error saving version to Supabase:', error);
+          }
+        }
 
         set((state) => ({
           screens: state.screens.map((s) => {
@@ -219,7 +427,6 @@ export const useScreensStore = create<ScreensState>()(
       getScreenHtml: (screenId) => {
         const screen = get().screens.find((s) => s.id === screenId);
         if (!screen) return null;
-        // Return edited HTML if available, otherwise null (will use filePath)
         return screen.editedHtml || null;
       },
 
@@ -250,7 +457,6 @@ export const useScreensStore = create<ScreensState>()(
       partialize: (state) => ({
         screens: state.screens.map((s) => ({
           ...s,
-          // Only persist edited content, not the full mock data
           ...(s.editedHtml ? { editedHtml: s.editedHtml } : {}),
           ...(s.versions ? { versions: s.versions } : {}),
           ...(s.currentVersionId ? { currentVersionId: s.currentVersionId } : {}),
