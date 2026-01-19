@@ -154,23 +154,28 @@ export async function saveApiKey(params: SaveApiKeyParams): Promise<void> {
     return;
   }
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
     throw new Error('You must be logged in to save API keys');
   }
 
-  // Call the vault function to securely store the key
-  const { error } = await supabase.rpc('store_api_key', {
-    p_user_id: user.id,
-    p_provider: provider,
-    p_api_key: apiKey,
-    p_key_name: keyName,
-    p_model: model || providerInfo.defaultModel,
+  // Call Edge Function to store in vault (service_role has vault permissions)
+  const { data, error } = await supabase.functions.invoke('store-api-key', {
+    body: {
+      provider,
+      apiKey,
+      keyName,
+      model: model || providerInfo.defaultModel,
+    },
   });
 
   if (error) {
     console.error('Error saving API key:', error);
     throw new Error(`Failed to save API key: ${error.message}`);
+  }
+
+  if (!data?.success) {
+    throw new Error(data?.error || 'Failed to save API key');
   }
 }
 
@@ -198,19 +203,23 @@ export async function deleteApiKey(provider: LLMProvider): Promise<void> {
     return;
   }
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
     throw new Error('You must be logged in to delete API keys');
   }
 
-  const { error } = await supabase.rpc('delete_api_key', {
-    p_user_id: user.id,
-    p_provider: provider,
+  // Call Edge Function to delete from vault
+  const { data, error } = await supabase.functions.invoke('delete-api-key', {
+    body: { provider },
   });
 
   if (error) {
     console.error('Error deleting API key:', error);
     throw new Error(`Failed to delete API key: ${error.message}`);
+  }
+
+  if (!data?.success) {
+    throw new Error(data?.error || 'Failed to delete API key');
   }
 }
 
