@@ -86,6 +86,7 @@ import {
   estimateTokens,
   type CompactionMethod,
   type CompactionResult,
+  type MethodInfo,
 } from '@/services/htmlCompactor';
 
 const { Sider } = Layout;
@@ -167,7 +168,7 @@ function AIPromptPanel() {
   const [showCompare, setShowCompare] = useState(false);
 
   // HTML Compaction
-  const [compactionMethod, setCompactionMethod] = useState<CompactionMethod>('aggressive');
+  const [compactionMethod, setCompactionMethod] = useState<CompactionMethod>('combined-optimal');
   const [compactionResult, setCompactionResult] = useState<CompactionResult | null>(null);
   const [showCompactionStats, setShowCompactionStats] = useState(false);
 
@@ -260,7 +261,7 @@ function AIPromptPanel() {
     console.log('[Editor] 📦 Compacting HTML with method:', compactionMethod);
     console.log('[Editor] 📦 Original HTML size:', currentHtml?.length);
 
-    const compacted = compactHtml(currentHtml || '', { method: compactionMethod });
+    const compacted = await compactHtml(currentHtml || '', { method: compactionMethod });
     setCompactionResult(compacted);
     setShowCompactionStats(true);
 
@@ -515,19 +516,40 @@ function AIPromptPanel() {
             onChange={setCompactionMethod}
             style={{ width: '100%' }}
             size="small"
-            options={getAvailableMethods().map(m => ({
-              value: m.value,
-              label: (
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span>{m.label}</span>
-                  <span style={{ fontSize: 10, color: '#999' }}>{m.description}</span>
-                </div>
-              ),
-            }))}
+            popupMatchSelectWidth={false}
+            dropdownStyle={{ minWidth: 320 }}
+            options={(() => {
+              const methods = getAvailableMethods();
+              const categories = ['regex', 'library', 'dom', 'combined'] as const;
+              const categoryLabels = {
+                regex: '📝 Regex (Custom)',
+                library: '📚 Library-based',
+                dom: '🌐 DOM (Browser API)',
+                combined: '🔗 Combined',
+              };
+
+              return categories.map(cat => ({
+                label: categoryLabels[cat],
+                options: methods
+                  .filter(m => m.category === cat)
+                  .map(m => ({
+                    value: m.value,
+                    label: (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <div>
+                          <div style={{ fontWeight: 500 }}>{m.label}</div>
+                          <div style={{ fontSize: 10, color: '#999' }}>{m.description}</div>
+                        </div>
+                        <Tag color="blue" style={{ fontSize: 9, margin: 0 }}>{m.expectedReduction}</Tag>
+                      </div>
+                    ),
+                  })),
+              }));
+            })()}
             optionLabelProp="label"
             labelRender={(option) => {
               const method = getAvailableMethods().find(m => m.value === option.value);
-              return method?.label || option.value;
+              return method?.label || String(option.value);
             }}
           />
           {currentHtml && currentHtml.length > 50000 && (
@@ -555,9 +577,14 @@ function AIPromptPanel() {
             </Text>
             <Tag color="green" style={{ fontSize: 10 }}>-{compactionResult.reductionPercent}%</Tag>
           </div>
-          <Text type="secondary" style={{ fontSize: 10 }}>
-            ~{estimateTokens(compactionResult.html).toLocaleString()} tokens
-          </Text>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Text type="secondary" style={{ fontSize: 10 }}>
+              ~{estimateTokens(compactionResult.html).toLocaleString()} tokens
+            </Text>
+            <Text type="secondary" style={{ fontSize: 10 }}>
+              ⏱️ {compactionResult.processingTime.toFixed(0)}ms
+            </Text>
+          </div>
           {compactionResult.warnings.length > 0 && (
             <div style={{ marginTop: 4 }}>
               {compactionResult.warnings.map((w, i) => (

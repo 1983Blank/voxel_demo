@@ -2,17 +2,39 @@
  * HTML Compactor Service
  *
  * Provides multiple strategies to reduce HTML size before sending to LLM.
- * Large HTML files (like SingleFile captures) can be 500KB+ which exceeds
- * LLM context limits and Edge Function payload limits.
+ * Includes both custom regex-based methods and library-based methods.
+ *
+ * Libraries used:
+ * - sanitize-html: HTML sanitization with configurable tag/attribute stripping
+ * - html-minifier-terser: Production-grade HTML minification
+ * - DOMParser: Native browser API for DOM manipulation
  */
 
+import sanitizeHtml from 'sanitize-html';
+import { minify as htmlMinifierMinify } from 'html-minifier-terser';
+
+// ============================================
+// COMPACTION METHOD TYPES
+// ============================================
+
 export type CompactionMethod =
-  | 'none'           // No compaction - send as-is
-  | 'minify'         // Remove whitespace, comments
-  | 'strip-base64'   // Replace base64 images with placeholders
-  | 'strip-styles'   // Remove inline styles, keep classes
-  | 'extract-body'   // Extract only body content
-  | 'aggressive';    // Combine all methods
+  // Custom regex-based methods
+  | 'none'                    // No compaction - send as-is
+  | 'regex-minify'            // Regex: Remove whitespace, comments
+  | 'regex-strip-base64'      // Regex: Replace base64 images with placeholders
+  | 'regex-strip-styles'      // Regex: Remove inline styles
+  | 'regex-extract-body'      // Regex: Extract only body content
+  | 'regex-aggressive'        // Regex: All custom methods combined
+  // Library-based methods
+  | 'lib-sanitize'            // sanitize-html: Strip dangerous/unnecessary tags
+  | 'lib-sanitize-strict'     // sanitize-html: Very strict, text-focused
+  | 'lib-minifier'            // html-minifier-terser: Production minification
+  | 'lib-minifier-aggressive' // html-minifier-terser: Maximum compression
+  | 'dom-extract-text'        // DOMParser: Extract text content only
+  | 'dom-extract-structure'   // DOMParser: Keep structure, strip attributes
+  // Combined methods
+  | 'combined-optimal'        // Best combination for LLM processing
+  | 'combined-maximum';       // Maximum possible reduction
 
 export interface CompactionResult {
   html: string;
@@ -21,18 +43,21 @@ export interface CompactionResult {
   reductionPercent: number;
   method: CompactionMethod;
   warnings: string[];
+  processingTime: number;  // milliseconds
 }
 
 export interface CompactionOptions {
   method: CompactionMethod;
-  maxSize?: number;  // Target max size in bytes
-  preserveIds?: boolean;  // Keep element IDs for reference
+  maxSize?: number;
+  preserveIds?: boolean;
 }
 
-/**
- * Compact HTML using the specified method
- */
-export function compactHtml(html: string, options: CompactionOptions): CompactionResult {
+// ============================================
+// MAIN COMPACTION FUNCTION
+// ============================================
+
+export async function compactHtml(html: string, options: CompactionOptions): Promise<CompactionResult> {
+  const startTime = performance.now();
   const originalSize = html.length;
   const warnings: string[] = [];
   let compacted = html;
@@ -40,49 +65,100 @@ export function compactHtml(html: string, options: CompactionOptions): Compactio
   console.log(`[Compactor] Starting compaction with method: ${options.method}`);
   console.log(`[Compactor] Original size: ${formatBytes(originalSize)}`);
 
-  switch (options.method) {
-    case 'none':
-      // No compaction
-      break;
+  try {
+    switch (options.method) {
+      // ---- Custom Regex Methods ----
+      case 'none':
+        break;
 
-    case 'minify':
-      compacted = minifyHtml(html);
-      break;
+      case 'regex-minify':
+        compacted = regexMinify(html);
+        break;
 
-    case 'strip-base64':
-      compacted = stripBase64Images(html);
-      break;
+      case 'regex-strip-base64':
+        compacted = regexStripBase64(html);
+        break;
 
-    case 'strip-styles':
-      compacted = stripInlineStyles(html);
-      break;
+      case 'regex-strip-styles':
+        compacted = regexStripStyles(html);
+        break;
 
-    case 'extract-body':
-      compacted = extractBodyContent(html);
-      break;
+      case 'regex-extract-body':
+        compacted = regexExtractBody(html);
+        break;
 
-    case 'aggressive':
-      // Apply all methods in sequence
-      compacted = extractBodyContent(html);
-      compacted = stripBase64Images(compacted);
-      compacted = stripInlineStyles(compacted);
-      compacted = minifyHtml(compacted);
-      break;
+      case 'regex-aggressive':
+        compacted = regexExtractBody(html);
+        compacted = regexStripBase64(compacted);
+        compacted = regexStripStyles(compacted);
+        compacted = regexMinify(compacted);
+        break;
+
+      // ---- Library Methods ----
+      case 'lib-sanitize':
+        compacted = libSanitize(html);
+        break;
+
+      case 'lib-sanitize-strict':
+        compacted = libSanitizeStrict(html);
+        break;
+
+      case 'lib-minifier':
+        compacted = await libMinifier(html);
+        break;
+
+      case 'lib-minifier-aggressive':
+        compacted = await libMinifierAggressive(html);
+        break;
+
+      case 'dom-extract-text':
+        compacted = domExtractText(html);
+        break;
+
+      case 'dom-extract-structure':
+        compacted = domExtractStructure(html);
+        break;
+
+      // ---- Combined Methods ----
+      case 'combined-optimal':
+        // Best for LLM: sanitize + strip base64 + minify
+        compacted = regexStripBase64(html);
+        compacted = libSanitize(compacted);
+        compacted = await libMinifier(compacted);
+        break;
+
+      case 'combined-maximum':
+        // Maximum reduction: everything
+        compacted = regexExtractBody(html);
+        compacted = regexStripBase64(compacted);
+        compacted = libSanitizeStrict(compacted);
+        compacted = await libMinifierAggressive(compacted);
+        break;
+
+      default:
+        warnings.push(`Unknown method: ${options.method}, using none`);
+    }
+  } catch (error) {
+    console.error(`[Compactor] Error with method ${options.method}:`, error);
+    warnings.push(`Method ${options.method} failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    // Fall back to original
+    compacted = html;
   }
 
+  const processingTime = performance.now() - startTime;
   const compactedSize = compacted.length;
   const reductionPercent = Math.round((1 - compactedSize / originalSize) * 100);
 
   console.log(`[Compactor] Compacted size: ${formatBytes(compactedSize)}`);
   console.log(`[Compactor] Reduction: ${reductionPercent}%`);
+  console.log(`[Compactor] Processing time: ${processingTime.toFixed(0)}ms`);
 
-  // Add warnings for large files
+  // Add size warnings
   if (compactedSize > 100000) {
-    warnings.push(`HTML is still ${formatBytes(compactedSize)} - consider using a more aggressive compaction method`);
+    warnings.push(`HTML is still ${formatBytes(compactedSize)} - may be too large for some models`);
   }
-
   if (compactedSize > 500000) {
-    warnings.push('HTML exceeds 500KB - LLM may truncate or fail to process');
+    warnings.push('HTML exceeds 500KB - LLM will likely truncate or fail');
   }
 
   return {
@@ -92,191 +168,418 @@ export function compactHtml(html: string, options: CompactionOptions): Compactio
     reductionPercent,
     method: options.method,
     warnings,
+    processingTime,
   };
 }
 
-/**
- * Minify HTML - remove whitespace, comments, and unnecessary characters
- */
-function minifyHtml(html: string): string {
+// ============================================
+// REGEX-BASED METHODS (Custom)
+// ============================================
+
+function regexMinify(html: string): string {
   let result = html;
-
-  // Remove HTML comments (but keep conditional comments for IE)
+  // Remove HTML comments (preserve IE conditionals)
   result = result.replace(/<!--(?!\[if)[\s\S]*?-->/gi, '');
-
   // Remove whitespace between tags
   result = result.replace(/>\s+</g, '><');
-
-  // Collapse multiple whitespaces to single space
+  // Collapse multiple whitespaces
   result = result.replace(/\s{2,}/g, ' ');
-
-  // Remove whitespace around = in attributes
+  // Remove whitespace around =
   result = result.replace(/\s*=\s*/g, '=');
-
-  // Trim leading/trailing whitespace
-  result = result.trim();
-
-  return result;
+  return result.trim();
 }
 
-/**
- * Strip base64 encoded images and replace with placeholders
- */
-function stripBase64Images(html: string): string {
-  let imageCount = 0;
-
-  // Replace base64 data URLs in src attributes
-  let result = html.replace(
-    /src=["']data:image\/[^;]+;base64,[^"']+["']/gi,
-    () => {
-      imageCount++;
-      return `src="[BASE64_IMAGE_${imageCount}]"`;
-    }
-  );
-
-  // Replace base64 in CSS background-image
-  result = result.replace(
-    /url\(["']?data:image\/[^;]+;base64,[^)"']+["']?\)/gi,
-    () => {
-      imageCount++;
-      return `url([BASE64_IMAGE_${imageCount}])`;
-    }
-  );
-
-  // Replace base64 in srcset
-  result = result.replace(
-    /srcset=["'][^"']*data:image\/[^;]+;base64,[^"']+["']/gi,
-    () => {
-      imageCount++;
-      return `srcset="[BASE64_IMAGE_${imageCount}]"`;
-    }
-  );
-
-  if (imageCount > 0) {
-    console.log(`[Compactor] Replaced ${imageCount} base64 images`);
-  }
-
-  return result;
-}
-
-/**
- * Strip inline styles - remove style attributes and style tags
- */
-function stripInlineStyles(html: string): string {
+function regexStripBase64(html: string): string {
+  let count = 0;
   let result = html;
 
-  // Remove style attributes
-  result = result.replace(/\s+style=["'][^"']*["']/gi, '');
+  // src attributes
+  result = result.replace(/src=["']data:image\/[^;]+;base64,[^"']+["']/gi, () => {
+    count++;
+    return `src="[IMG_${count}]"`;
+  });
 
-  // Remove <style> tags and their content
-  result = result.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  // CSS background-image
+  result = result.replace(/url\(["']?data:image\/[^;]+;base64,[^)"']+["']?\)/gi, () => {
+    count++;
+    return `url([IMG_${count}])`;
+  });
 
-  // Remove CSS in <link> tags (referenced stylesheets stay as references)
-  // We keep <link> tags as they're just references
+  // srcset
+  result = result.replace(/srcset=["'][^"']*data:image\/[^;]+;base64,[^"']+["']/gi, () => {
+    count++;
+    return `srcset="[IMG_${count}]"`;
+  });
 
+  // Also strip data URLs for other types (fonts, etc)
+  result = result.replace(/url\(["']?data:[^)]+["']?\)/gi, () => {
+    count++;
+    return `url([DATA_${count}])`;
+  });
+
+  if (count > 0) {
+    console.log(`[Compactor] Replaced ${count} data URLs`);
+  }
   return result;
 }
 
-/**
- * Extract only the body content, removing head and scripts
- */
-function extractBodyContent(html: string): string {
-  // Try to extract body content
-  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-
-  if (bodyMatch) {
-    let body = bodyMatch[1];
-
-    // Remove script tags
-    body = body.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-
-    // Remove noscript tags
-    body = body.replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '');
-
-    // Remove link tags (stylesheets)
-    body = body.replace(/<link[^>]*>/gi, '');
-
-    // Remove meta tags that might be in body
-    body = body.replace(/<meta[^>]*>/gi, '');
-
-    // Wrap in minimal HTML structure
-    return `<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"><title>Compacted</title></head>
-<body>
-${body.trim()}
-</body>
-</html>`;
-  }
-
-  // If no body tag found, return as-is
-  return html;
+function regexStripStyles(html: string): string {
+  let result = html;
+  // Remove style attributes
+  result = result.replace(/\s+style=["'][^"']*["']/gi, '');
+  // Remove <style> tags
+  result = result.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  return result;
 }
 
-/**
- * Format bytes to human readable string
- */
+function regexExtractBody(html: string): string {
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (!bodyMatch) return html;
+
+  let body = bodyMatch[1];
+  // Remove scripts
+  body = body.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+  // Remove noscript
+  body = body.replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '');
+  // Remove link tags
+  body = body.replace(/<link[^>]*>/gi, '');
+  // Remove meta tags
+  body = body.replace(/<meta[^>]*>/gi, '');
+  // Remove SVG (often large)
+  body = body.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '[SVG]');
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body>${body.trim()}</body></html>`;
+}
+
+// ============================================
+// SANITIZE-HTML METHODS
+// ============================================
+
+function libSanitize(html: string): string {
+  return sanitizeHtml(html, {
+    allowedTags: [
+      'html', 'head', 'body', 'title', 'meta',
+      'div', 'span', 'p', 'a', 'img', 'br', 'hr',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'form', 'input', 'button', 'select', 'option', 'textarea', 'label',
+      'header', 'footer', 'nav', 'main', 'section', 'article', 'aside',
+      'strong', 'em', 'b', 'i', 'u', 'small', 'mark', 'code', 'pre',
+      'blockquote', 'figure', 'figcaption', 'video', 'audio', 'source',
+    ],
+    allowedAttributes: {
+      '*': ['id', 'class', 'title', 'role', 'aria-*', 'data-*'],
+      'a': ['href', 'target', 'rel'],
+      'img': ['src', 'alt', 'width', 'height'],
+      'input': ['type', 'name', 'value', 'placeholder', 'required', 'disabled'],
+      'button': ['type', 'name', 'value', 'disabled'],
+      'select': ['name', 'required', 'disabled'],
+      'option': ['value', 'selected'],
+      'textarea': ['name', 'placeholder', 'required', 'disabled', 'rows', 'cols'],
+      'form': ['action', 'method'],
+      'meta': ['charset', 'name', 'content'],
+      'video': ['src', 'controls', 'width', 'height'],
+      'audio': ['src', 'controls'],
+      'source': ['src', 'type'],
+    },
+    allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+    allowedSchemesByTag: {
+      img: ['http', 'https', 'data'],
+    },
+  });
+}
+
+function libSanitizeStrict(html: string): string {
+  // Very strict - mainly text content with basic structure
+  return sanitizeHtml(html, {
+    allowedTags: [
+      'html', 'head', 'body', 'title',
+      'div', 'span', 'p', 'a', 'br',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'ul', 'ol', 'li',
+      'table', 'tr', 'th', 'td',
+      'strong', 'em', 'b', 'i',
+      'header', 'footer', 'nav', 'main', 'section',
+    ],
+    allowedAttributes: {
+      'a': ['href'],
+      '*': ['id', 'class'],
+    },
+    allowedSchemes: ['http', 'https'],
+  });
+}
+
+// ============================================
+// HTML-MINIFIER-TERSER METHODS
+// ============================================
+
+async function libMinifier(html: string): Promise<string> {
+  try {
+    return await htmlMinifierMinify(html, {
+      collapseWhitespace: true,
+      removeComments: true,
+      removeRedundantAttributes: true,
+      removeEmptyAttributes: true,
+      minifyCSS: true,
+      minifyJS: true,
+    });
+  } catch (error) {
+    console.warn('[Compactor] html-minifier-terser failed:', error);
+    return html;
+  }
+}
+
+async function libMinifierAggressive(html: string): Promise<string> {
+  try {
+    return await htmlMinifierMinify(html, {
+      collapseWhitespace: true,
+      conservativeCollapse: false,
+      collapseInlineTagWhitespace: true,
+      removeComments: true,
+      removeCommentsFromCDATA: true,
+      removeRedundantAttributes: true,
+      removeEmptyAttributes: true,
+      removeEmptyElements: false,  // Keep structure
+      removeOptionalTags: true,
+      removeScriptTypeAttributes: true,
+      removeStyleLinkTypeAttributes: true,
+      minifyCSS: true,
+      minifyJS: true,
+      minifyURLs: true,
+      sortAttributes: true,
+      sortClassName: true,
+      useShortDoctype: true,
+      trimCustomFragments: true,
+    });
+  } catch (error) {
+    console.warn('[Compactor] html-minifier-terser aggressive failed:', error);
+    return html;
+  }
+}
+
+// ============================================
+// DOM-BASED METHODS (Native Browser API)
+// ============================================
+
+function domExtractText(html: string): string {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // Remove scripts and styles
+    doc.querySelectorAll('script, style, noscript, link').forEach(el => el.remove());
+
+    // Get text content with basic structure
+    const extractTextWithStructure = (element: Element, depth = 0): string => {
+      const lines: string[] = [];
+      const indent = '  '.repeat(depth);
+
+      for (const child of Array.from(element.childNodes)) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          const text = child.textContent?.trim();
+          if (text) {
+            lines.push(indent + text);
+          }
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+          const el = child as Element;
+          const tag = el.tagName.toLowerCase();
+
+          // Skip hidden elements
+          if (tag === 'script' || tag === 'style' || tag === 'noscript') continue;
+
+          // Add structure markers for important elements
+          if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
+            lines.push(`\n${indent}## ${el.textContent?.trim() || ''}`);
+          } else if (tag === 'p' || tag === 'div' || tag === 'section' || tag === 'article') {
+            const content = extractTextWithStructure(el, depth);
+            if (content.trim()) {
+              lines.push(content);
+            }
+          } else if (tag === 'li') {
+            lines.push(`${indent}- ${el.textContent?.trim() || ''}`);
+          } else if (tag === 'a') {
+            const href = el.getAttribute('href');
+            lines.push(`${indent}[${el.textContent?.trim()}](${href || '#'})`);
+          } else {
+            const content = extractTextWithStructure(el, depth);
+            if (content.trim()) {
+              lines.push(content);
+            }
+          }
+        }
+      }
+
+      return lines.join('\n');
+    };
+
+    const body = doc.body;
+    const textContent = extractTextWithStructure(body);
+
+    // Wrap in minimal HTML
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><pre>${textContent}</pre></body></html>`;
+  } catch (error) {
+    console.warn('[Compactor] DOM text extraction failed:', error);
+    return html;
+  }
+}
+
+function domExtractStructure(html: string): string {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // Remove all attributes except essential ones
+    const keepAttributes = ['id', 'class', 'href', 'src', 'alt', 'type', 'name', 'value'];
+
+    const cleanElement = (element: Element) => {
+      // Remove unwanted elements
+      if (['script', 'style', 'noscript', 'link', 'meta', 'svg'].includes(element.tagName.toLowerCase())) {
+        element.remove();
+        return;
+      }
+
+      // Clean attributes
+      const attrsToRemove: string[] = [];
+      for (const attr of Array.from(element.attributes)) {
+        if (!keepAttributes.includes(attr.name) && !attr.name.startsWith('aria-')) {
+          attrsToRemove.push(attr.name);
+        }
+        // Replace base64 images
+        if (attr.name === 'src' && attr.value.startsWith('data:')) {
+          element.setAttribute('src', '[IMG]');
+        }
+      }
+      attrsToRemove.forEach(attr => element.removeAttribute(attr));
+
+      // Recurse
+      for (const child of Array.from(element.children)) {
+        cleanElement(child);
+      }
+    };
+
+    cleanElement(doc.documentElement);
+
+    return doc.documentElement.outerHTML;
+  } catch (error) {
+    console.warn('[Compactor] DOM structure extraction failed:', error);
+    return html;
+  }
+}
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/**
- * Get recommended compaction method based on HTML size
- */
 export function getRecommendedMethod(htmlSize: number): CompactionMethod {
-  if (htmlSize < 50000) return 'none';           // Under 50KB - no compaction needed
-  if (htmlSize < 100000) return 'minify';        // 50-100KB - just minify
-  if (htmlSize < 200000) return 'strip-base64';  // 100-200KB - strip images
-  if (htmlSize < 500000) return 'extract-body';  // 200-500KB - extract body
-  return 'aggressive';                            // Over 500KB - aggressive
+  if (htmlSize < 30000) return 'none';
+  if (htmlSize < 50000) return 'regex-minify';
+  if (htmlSize < 100000) return 'lib-minifier';
+  if (htmlSize < 200000) return 'regex-strip-base64';
+  if (htmlSize < 500000) return 'combined-optimal';
+  return 'combined-maximum';
 }
 
-/**
- * Get human-readable description of compaction method
- */
-export function getMethodDescription(method: CompactionMethod): string {
-  switch (method) {
-    case 'none':
-      return 'No compaction - send HTML as-is';
-    case 'minify':
-      return 'Remove whitespace and comments';
-    case 'strip-base64':
-      return 'Replace base64 images with placeholders';
-    case 'strip-styles':
-      return 'Remove inline styles and style tags';
-    case 'extract-body':
-      return 'Extract body content, remove scripts';
-    case 'aggressive':
-      return 'All methods combined (maximum reduction)';
-    default:
-      return 'Unknown method';
-  }
-}
-
-/**
- * Estimate token count (rough approximation)
- * GPT-4/Claude: ~4 chars per token on average for HTML
- */
 export function estimateTokens(html: string): number {
+  // ~4 chars per token for HTML on average
   return Math.ceil(html.length / 4);
 }
 
-/**
- * Get all available compaction methods with metadata
- */
-export function getAvailableMethods(): Array<{
+export interface MethodInfo {
   value: CompactionMethod;
   label: string;
   description: string;
-}> {
+  category: 'regex' | 'library' | 'dom' | 'combined';
+  expectedReduction: string;
+}
+
+export function getAvailableMethods(): MethodInfo[] {
   return [
-    { value: 'none', label: 'None', description: 'Send HTML as-is (best for small files)' },
-    { value: 'minify', label: 'Minify', description: 'Remove whitespace and comments (~10-20% reduction)' },
-    { value: 'strip-base64', label: 'Strip Images', description: 'Replace base64 images with placeholders (~50-80% for image-heavy pages)' },
-    { value: 'strip-styles', label: 'Strip Styles', description: 'Remove inline styles and CSS (~20-40% reduction)' },
-    { value: 'extract-body', label: 'Body Only', description: 'Extract body content, remove head/scripts (~30-50% reduction)' },
-    { value: 'aggressive', label: 'Aggressive', description: 'All methods combined (maximum reduction, may affect layout)' },
+    // Regex methods
+    { value: 'none', label: 'None', description: 'No compaction - send as-is', category: 'regex', expectedReduction: '0%' },
+    { value: 'regex-minify', label: 'Regex: Minify', description: 'Remove whitespace and comments', category: 'regex', expectedReduction: '10-20%' },
+    { value: 'regex-strip-base64', label: 'Regex: Strip Base64', description: 'Replace base64 data URLs with placeholders', category: 'regex', expectedReduction: '50-90%' },
+    { value: 'regex-strip-styles', label: 'Regex: Strip Styles', description: 'Remove inline styles and style tags', category: 'regex', expectedReduction: '20-40%' },
+    { value: 'regex-extract-body', label: 'Regex: Body Only', description: 'Extract body, remove scripts/head', category: 'regex', expectedReduction: '30-50%' },
+    { value: 'regex-aggressive', label: 'Regex: Aggressive', description: 'All regex methods combined', category: 'regex', expectedReduction: '60-80%' },
+
+    // Library methods
+    { value: 'lib-sanitize', label: 'Lib: Sanitize', description: 'sanitize-html with safe defaults', category: 'library', expectedReduction: '20-40%' },
+    { value: 'lib-sanitize-strict', label: 'Lib: Sanitize Strict', description: 'sanitize-html with minimal tags', category: 'library', expectedReduction: '40-60%' },
+    { value: 'lib-minifier', label: 'Lib: Minifier', description: 'html-minifier-terser standard', category: 'library', expectedReduction: '15-30%' },
+    { value: 'lib-minifier-aggressive', label: 'Lib: Minifier Aggressive', description: 'html-minifier-terser max compression', category: 'library', expectedReduction: '20-40%' },
+
+    // DOM methods
+    { value: 'dom-extract-text', label: 'DOM: Text Only', description: 'Extract text content with structure markers', category: 'dom', expectedReduction: '70-90%' },
+    { value: 'dom-extract-structure', label: 'DOM: Clean Structure', description: 'Keep structure, strip most attributes', category: 'dom', expectedReduction: '40-60%' },
+
+    // Combined methods
+    { value: 'combined-optimal', label: 'Combined: Optimal', description: 'Best for LLM (sanitize + strip base64 + minify)', category: 'combined', expectedReduction: '60-85%' },
+    { value: 'combined-maximum', label: 'Combined: Maximum', description: 'Maximum reduction (may lose layout)', category: 'combined', expectedReduction: '80-95%' },
   ];
+}
+
+// For backwards compatibility - sync wrapper (uses async internally)
+export function compactHtmlSync(html: string, options: CompactionOptions): CompactionResult {
+  // For sync methods, call directly
+  const syncMethods: CompactionMethod[] = [
+    'none', 'regex-minify', 'regex-strip-base64', 'regex-strip-styles',
+    'regex-extract-body', 'regex-aggressive',
+    'lib-sanitize', 'lib-sanitize-strict',
+    'dom-extract-text', 'dom-extract-structure'
+  ];
+
+  if (syncMethods.includes(options.method)) {
+    const startTime = performance.now();
+    const originalSize = html.length;
+    const warnings: string[] = [];
+    let compacted = html;
+
+    switch (options.method) {
+      case 'none': break;
+      case 'regex-minify': compacted = regexMinify(html); break;
+      case 'regex-strip-base64': compacted = regexStripBase64(html); break;
+      case 'regex-strip-styles': compacted = regexStripStyles(html); break;
+      case 'regex-extract-body': compacted = regexExtractBody(html); break;
+      case 'regex-aggressive':
+        compacted = regexExtractBody(html);
+        compacted = regexStripBase64(compacted);
+        compacted = regexStripStyles(compacted);
+        compacted = regexMinify(compacted);
+        break;
+      case 'lib-sanitize': compacted = libSanitize(html); break;
+      case 'lib-sanitize-strict': compacted = libSanitizeStrict(html); break;
+      case 'dom-extract-text': compacted = domExtractText(html); break;
+      case 'dom-extract-structure': compacted = domExtractStructure(html); break;
+    }
+
+    const compactedSize = compacted.length;
+    return {
+      html: compacted,
+      originalSize,
+      compactedSize,
+      reductionPercent: Math.round((1 - compactedSize / originalSize) * 100),
+      method: options.method,
+      warnings,
+      processingTime: performance.now() - startTime,
+    };
+  }
+
+  // For async methods, return a placeholder - caller should use async version
+  console.warn('[Compactor] Method requires async, use compactHtml() instead');
+  return {
+    html,
+    originalSize: html.length,
+    compactedSize: html.length,
+    reductionPercent: 0,
+    method: options.method,
+    warnings: ['This method requires async - use compactHtml()'],
+    processingTime: 0,
+  };
 }
