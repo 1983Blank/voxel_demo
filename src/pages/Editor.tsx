@@ -66,6 +66,9 @@ import {
   RollbackOutlined,
   EyeOutlined,
   SwapOutlined,
+  BugOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useScreensStore } from '@/store/screensStore';
 import { useEditorStore } from '@/store/editorStore';
@@ -213,6 +216,16 @@ function AIPromptPanel() {
   const [compactionMethod, setCompactionMethod] = useState<CompactionMethod>('combined-optimal');
   const [compactionResult, setCompactionResult] = useState<CompactionResult | null>(null);
   const [showCompactionStats, setShowCompactionStats] = useState(false);
+
+  // Debug mode
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<{
+    sentHtml: string;
+    fullPrompt: string;
+    response: string;
+    provider: string;
+    model: string;
+  } | null>(null);
 
   const {
     isGenerating,
@@ -372,6 +385,15 @@ function AIPromptPanel() {
       htmlLength: response.html?.length,
     });
 
+    // Save debug info
+    setDebugInfo({
+      sentHtml: compacted.html,
+      fullPrompt: enhancedPrompt + (productContext ? `\n\nProduct Context:\n${productContext}` : ''),
+      response: response.success ? response.html : (response.error || 'Unknown error'),
+      provider: selectedProvider || 'unknown',
+      model: selectedModel || 'unknown',
+    });
+
     // Stage 3: Processing
     setGenerationStage('processing');
     setStageMessage('Processing response...');
@@ -477,11 +499,21 @@ function AIPromptPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <ThunderboltOutlined style={{ color: '#764ba2', fontSize: 18 }} />
           <Text strong style={{ fontSize: 16 }}>Vibe Coding</Text>
-          {versions.length > 0 && (
-            <Tag color="purple" style={{ marginLeft: 'auto' }}>
-              {versions.length} version{versions.length > 1 ? 's' : ''}
-            </Tag>
-          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+            {versions.length > 0 && (
+              <Tag color="purple">
+                {versions.length} version{versions.length > 1 ? 's' : ''}
+              </Tag>
+            )}
+            <Tooltip title={debugMode ? 'Hide Debug Info' : 'Show Debug Info'}>
+              <Button
+                type={debugMode ? 'primary' : 'text'}
+                size="small"
+                icon={<BugOutlined />}
+                onClick={() => setDebugMode(!debugMode)}
+              />
+            </Tooltip>
+          </div>
         </div>
         <Text type="secondary" style={{ fontSize: 12 }}>
           Describe changes in natural language and AI will modify your screen
@@ -649,26 +681,47 @@ function AIPromptPanel() {
         </div>
       )}
 
-      {/* Progress Steps - Show during generation */}
+      {/* Progress - Show during generation */}
       {generationStage !== 'idle' && (
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa', flexShrink: 0 }}>
-          <Steps
-            size="small"
-            current={['preparing', 'sending', 'processing', 'complete'].indexOf(generationStage)}
-            status={generationStage === 'error' ? 'error' : undefined}
-            items={[
-              { title: 'Prepare', icon: <CodeOutlined /> },
-              { title: 'Send', icon: <CloudOutlined /> },
-              { title: 'Process', icon: <ExperimentOutlined /> },
-              { title: 'Done', icon: generationStage === 'error' ? <CloseCircleOutlined /> : <CheckOutlined /> },
-            ]}
-          />
-          <div style={{ textAlign: 'center', marginTop: 8 }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>{stageMessage}</Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            {generationStage === 'error' ? (
+              <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+            ) : generationStage === 'complete' ? (
+              <CheckOutlined style={{ color: '#52c41a' }} />
+            ) : (
+              <Spin size="small" />
+            )}
+            <Text style={{ fontSize: 12, flex: 1 }}>{stageMessage}</Text>
+            <Tag
+              color={
+                generationStage === 'error' ? 'error' :
+                generationStage === 'complete' ? 'success' :
+                'processing'
+              }
+              style={{ fontSize: 10, margin: 0 }}
+            >
+              {generationStage === 'preparing' ? '1/4' :
+               generationStage === 'sending' ? '2/4' :
+               generationStage === 'processing' ? '3/4' :
+               generationStage === 'complete' ? '4/4' : ''}
+            </Tag>
           </div>
-          {generationStage === 'sending' && (
-            <Progress percent={100} status="active" showInfo={false} size="small" style={{ marginTop: 8 }} />
-          )}
+          <Progress
+            percent={
+              generationStage === 'preparing' ? 25 :
+              generationStage === 'sending' ? 50 :
+              generationStage === 'processing' ? 75 :
+              generationStage === 'complete' ? 100 : 0
+            }
+            status={
+              generationStage === 'error' ? 'exception' :
+              generationStage === 'sending' ? 'active' :
+              generationStage === 'complete' ? 'success' : 'normal'
+            }
+            showInfo={false}
+            size="small"
+          />
         </div>
       )}
 
@@ -685,6 +738,51 @@ function AIPromptPanel() {
                 Retry
               </Button>
             }
+          />
+        </div>
+      )}
+
+      {/* Debug Panel */}
+      {debugMode && debugInfo && (
+        <div style={{ borderBottom: '1px solid #f0f0f0', flexShrink: 0, maxHeight: '40%', overflow: 'auto' }}>
+          <Collapse
+            size="small"
+            defaultActiveKey={['prompt']}
+            items={[
+              {
+                key: 'prompt',
+                label: <Text style={{ fontSize: 11 }}><BugOutlined /> Prompt Sent ({debugInfo.provider}/{debugInfo.model})</Text>,
+                children: (
+                  <div style={{ background: '#1e1e1e', padding: 8, borderRadius: 4, maxHeight: 120, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: 10, color: '#d4d4d4', whiteSpace: 'pre-wrap' }}>
+                      {debugInfo.fullPrompt}
+                    </pre>
+                  </div>
+                ),
+              },
+              {
+                key: 'html',
+                label: <Text style={{ fontSize: 11 }}><CodeOutlined /> HTML Sent ({(debugInfo.sentHtml.length / 1024).toFixed(1)}KB)</Text>,
+                children: (
+                  <div style={{ background: '#1e1e1e', padding: 8, borderRadius: 4, maxHeight: 150, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: 9, color: '#d4d4d4', whiteSpace: 'pre-wrap' }}>
+                      {debugInfo.sentHtml.substring(0, 5000)}{debugInfo.sentHtml.length > 5000 ? '\n\n... (truncated)' : ''}
+                    </pre>
+                  </div>
+                ),
+              },
+              {
+                key: 'response',
+                label: <Text style={{ fontSize: 11 }}><CheckOutlined /> Response ({(debugInfo.response.length / 1024).toFixed(1)}KB)</Text>,
+                children: (
+                  <div style={{ background: '#1e1e1e', padding: 8, borderRadius: 4, maxHeight: 150, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: 9, color: '#d4d4d4', whiteSpace: 'pre-wrap' }}>
+                      {debugInfo.response.substring(0, 5000)}{debugInfo.response.length > 5000 ? '\n\n... (truncated)' : ''}
+                    </pre>
+                  </div>
+                ),
+              },
+            ]}
           />
         </div>
       )}
@@ -2065,6 +2163,10 @@ export function Editor() {
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [imageModalSrc, setImageModalSrc] = useState('');
 
+  // Panel collapse state
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+
   // Handle element selection from VisualEditor
   const handleElementSelect = useCallback((props: ElementProperties | null, element: HTMLElement | null) => {
     setSelectedElementProps(props);
@@ -2417,11 +2519,36 @@ export function Editor() {
         {/* Left Panel - AI Prompt */}
         <Sider
           width={300}
+          collapsedWidth={0}
+          collapsible
+          collapsed={leftPanelCollapsed}
+          trigger={null}
           theme="light"
-          style={{ borderRight: '1px solid #f0f0f0', overflow: 'auto' }}
+          style={{ borderRight: leftPanelCollapsed ? 'none' : '1px solid #f0f0f0', overflow: 'auto' }}
         >
           <AIPromptPanel />
         </Sider>
+
+        {/* Left Panel Toggle */}
+        <Tooltip title={leftPanelCollapsed ? 'Show Vibe Coding Panel' : 'Hide Vibe Coding Panel'} placement="right">
+          <Button
+            type="text"
+            size="small"
+            icon={leftPanelCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
+            style={{
+              position: 'absolute',
+              left: leftPanelCollapsed ? 8 : 308,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 10,
+              background: 'white',
+              border: '1px solid #f0f0f0',
+              borderRadius: 4,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            }}
+          />
+        </Tooltip>
 
         {/* Center - Visual Editor */}
         {loading ? (
@@ -2446,11 +2573,36 @@ export function Editor() {
           />
         )}
 
+        {/* Right Panel Toggle */}
+        <Tooltip title={rightPanelCollapsed ? 'Show Edit Panel' : 'Hide Edit Panel'} placement="left">
+          <Button
+            type="text"
+            size="small"
+            icon={rightPanelCollapsed ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />}
+            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+            style={{
+              position: 'absolute',
+              right: rightPanelCollapsed ? 8 : 308,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 10,
+              background: 'white',
+              border: '1px solid #f0f0f0',
+              borderRadius: 4,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            }}
+          />
+        </Tooltip>
+
         {/* Right Panel - Property Editor + Version History */}
         <Sider
           width={300}
+          collapsedWidth={0}
+          collapsible
+          collapsed={rightPanelCollapsed}
+          trigger={null}
           theme="light"
-          style={{ borderLeft: '1px solid #f0f0f0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+          style={{ borderLeft: rightPanelCollapsed ? 'none' : '1px solid #f0f0f0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
         >
           <div style={{ flex: '0 0 auto', maxHeight: '50%', overflow: 'auto' }}>
             <PropertyPanel
