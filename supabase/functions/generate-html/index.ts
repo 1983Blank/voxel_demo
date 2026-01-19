@@ -146,8 +146,13 @@ async function generateWithGoogle(apiKey: string, model: string, request: Genera
 }
 
 Deno.serve(async (req) => {
+  console.log('[Edge] ======== REQUEST RECEIVED ========')
+  console.log('[Edge] Method:', req.method)
+  console.log('[Edge] URL:', req.url)
+
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
+    console.log('[Edge] Handling OPTIONS preflight')
     return new Response('ok', { headers: corsHeaders })
   }
 
@@ -155,16 +160,26 @@ Deno.serve(async (req) => {
     console.log('[Edge] ========================================')
     console.log('[Edge] generate-html function called')
 
+    // Check environment variables first
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+
+    console.log('[Edge] Environment check:')
+    console.log('[Edge] - SUPABASE_URL:', supabaseUrl ? 'SET' : 'MISSING')
+    console.log('[Edge] - SUPABASE_ANON_KEY:', supabaseAnonKey ? 'SET' : 'MISSING')
+    console.log('[Edge] - SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceKey ? 'SET' : 'MISSING')
+
+    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
+      throw new Error('Missing Supabase environment variables')
+    }
+
     // Get authorization header
     const authHeader = req.headers.get('Authorization')
+    console.log('[Edge] Authorization header:', authHeader ? 'present' : 'MISSING')
     if (!authHeader) {
       throw new Error('Missing authorization header')
     }
-
-    // Create Supabase client with user's token
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
     // Client for user authentication
     const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {

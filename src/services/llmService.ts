@@ -443,18 +443,35 @@ export async function generateHtml(
   console.log('[LLM] 🎯 Current HTML length:', request.currentHtml.length);
   console.log('[LLM] ========================================');
 
+  console.log('[LLM] 📦 Step 1: Importing supabase client...');
+
   // Import supabase client
-  const { supabase, isSupabaseConfigured } = await import('./supabase');
+  let supabase, isSupabaseConfigured;
+  try {
+    const supabaseModule = await import('./supabase');
+    supabase = supabaseModule.supabase;
+    isSupabaseConfigured = supabaseModule.isSupabaseConfigured;
+    console.log('[LLM] ✅ Step 1: Supabase client imported successfully');
+  } catch (importError) {
+    console.log('[LLM] ❌ Step 1: Failed to import supabase:', importError);
+    throw importError;
+  }
 
   // Check if Supabase is configured
-  if (!isSupabaseConfigured()) {
+  console.log('[LLM] 📦 Step 2: Checking Supabase configuration...');
+  const supabaseConfigured = isSupabaseConfigured();
+  console.log('[LLM] 📦 Step 2: isSupabaseConfigured =', supabaseConfigured);
+
+  if (!supabaseConfigured) {
     console.log('[LLM] ⚠️ Supabase not configured, trying direct API call...');
     // Fall back to direct API call for local development
     return generateHtmlDirect(request);
   }
 
   // Get user session for authentication
+  console.log('[LLM] 📦 Step 3: Getting user session...');
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  console.log('[LLM] 📦 Step 3: Session result:', { hasSession: !!session, error: sessionError });
 
   if (sessionError || !session) {
     console.log('[LLM] ❌ No session found:', sessionError);
@@ -465,18 +482,26 @@ export async function generateHtml(
     };
   }
 
-  console.log('[LLM] 🔐 User authenticated, calling Edge Function...');
+  console.log('[LLM] ✅ Step 3: User authenticated');
+  console.log('[LLM] 📦 Step 4: Calling Edge Function...');
 
   try {
     // Call the Edge Function
+    console.log('[LLM] 📤 Invoking Edge Function generate-html...');
+    console.log('[LLM] 📤 Supabase URL:', import.meta.env.VITE_SUPABASE_URL);
+
     const { data, error } = await supabase.functions.invoke('generate-html', {
       body: request,
     });
 
     console.log('[LLM] 📥 Edge Function response:', { data, error });
+    console.log('[LLM] 📥 Error details:', error ? JSON.stringify(error, null, 2) : 'none');
 
     if (error) {
       console.log('[LLM] ❌ Edge Function error:', error);
+      console.log('[LLM] ❌ Error name:', error.name);
+      console.log('[LLM] ❌ Error message:', error.message);
+      console.log('[LLM] ❌ Error context:', (error as any).context);
       return {
         html: request.currentHtml,
         success: false,

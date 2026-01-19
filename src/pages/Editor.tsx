@@ -79,6 +79,14 @@ import {
   type LLMProvider,
 } from '@/services/apiKeysService';
 import { uploadImage, getUserImages } from '@/services/storageService';
+import {
+  compactHtml,
+  getAvailableMethods,
+  getRecommendedMethod,
+  estimateTokens,
+  type CompactionMethod,
+  type CompactionResult,
+} from '@/services/htmlCompactor';
 
 const { Sider } = Layout;
 const { TextArea } = Input;
@@ -158,6 +166,11 @@ function AIPromptPanel() {
   const [currentVersionIndex, setCurrentVersionIndex] = useState(-1);
   const [showCompare, setShowCompare] = useState(false);
 
+  // HTML Compaction
+  const [compactionMethod, setCompactionMethod] = useState<CompactionMethod>('aggressive');
+  const [compactionResult, setCompactionResult] = useState<CompactionResult | null>(null);
+  const [showCompactionStats, setShowCompactionStats] = useState(false);
+
   const {
     isGenerating,
     setGenerating,
@@ -235,11 +248,38 @@ function AIPromptPanel() {
     setGenerating(true);
     setGeneratedHtml(null);
     setErrorMessage(null);
+    setShowCompactionStats(false);
+    setCompactionResult(null);
 
-    // Stage 1: Preparing
+    // Stage 1: Preparing (includes compaction)
     setGenerationStage('preparing');
-    setStageMessage('Preparing request...');
+    setStageMessage('Compacting HTML...');
     console.log('[Editor] 📋 Stage: Preparing');
+
+    // Compact the HTML before sending
+    console.log('[Editor] 📦 Compacting HTML with method:', compactionMethod);
+    console.log('[Editor] 📦 Original HTML size:', currentHtml?.length);
+
+    const compacted = compactHtml(currentHtml || '', { method: compactionMethod });
+    setCompactionResult(compacted);
+    setShowCompactionStats(true);
+
+    console.log('[Editor] 📦 Compaction result:', {
+      originalSize: compacted.originalSize,
+      compactedSize: compacted.compactedSize,
+      reductionPercent: compacted.reductionPercent,
+      warnings: compacted.warnings,
+    });
+
+    // Estimate tokens
+    const estimatedTokens = estimateTokens(compacted.html);
+    console.log('[Editor] 📦 Estimated tokens:', estimatedTokens);
+
+    if (compacted.warnings.length > 0) {
+      compacted.warnings.forEach(w => console.warn('[Editor] ⚠️', w));
+    }
+
+    setStageMessage('Preparing request...');
     await new Promise(r => setTimeout(r, 300));
 
     // Build enhanced prompt based on mode
@@ -259,14 +299,14 @@ function AIPromptPanel() {
     console.log('[Editor] 🚀 Calling generateHtml...');
     console.log('[Editor] 🚀 Request:', {
       prompt: enhancedPrompt,
-      currentHtmlLength: currentHtml?.length,
+      currentHtmlLength: compacted.compactedSize,
       hasContext: !!productContext,
       instruction: generationMode,
     });
 
     const response = await generateHtml({
       prompt: enhancedPrompt,
-      currentHtml,
+      currentHtml: compacted.html,  // Use compacted HTML
       context: productContext || undefined,
       instruction: generationMode,
     });
@@ -457,6 +497,76 @@ function AIPromptPanel() {
           </Space>
         )}
       </div>
+
+      {/* HTML Compaction Settings */}
+      {hasProviders && (
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <ExperimentOutlined style={{ color: '#722ed1', fontSize: 12 }} />
+            <Text type="secondary" style={{ fontSize: 11 }}>HTML Compaction</Text>
+            {currentHtml && (
+              <Tag color={currentHtml.length > 100000 ? 'red' : currentHtml.length > 50000 ? 'orange' : 'green'} style={{ fontSize: 10, marginLeft: 'auto' }}>
+                {(currentHtml.length / 1024).toFixed(0)}KB
+              </Tag>
+            )}
+          </div>
+          <Select
+            value={compactionMethod}
+            onChange={setCompactionMethod}
+            style={{ width: '100%' }}
+            size="small"
+            options={getAvailableMethods().map(m => ({
+              value: m.value,
+              label: (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span>{m.label}</span>
+                  <span style={{ fontSize: 10, color: '#999' }}>{m.description}</span>
+                </div>
+              ),
+            }))}
+            optionLabelProp="label"
+            labelRender={(option) => {
+              const method = getAvailableMethods().find(m => m.value === option.value);
+              return method?.label || option.value;
+            }}
+          />
+          {currentHtml && currentHtml.length > 50000 && (
+            <div style={{ marginTop: 6 }}>
+              <Text type="secondary" style={{ fontSize: 10 }}>
+                💡 Recommended: <Tag
+                  color="purple"
+                  style={{ fontSize: 10, cursor: 'pointer' }}
+                  onClick={() => setCompactionMethod(getRecommendedMethod(currentHtml.length))}
+                >
+                  {getRecommendedMethod(currentHtml.length)}
+                </Tag>
+              </Text>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Compaction Stats - Show after compaction */}
+      {showCompactionStats && compactionResult && (
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0f0f0', background: '#f6ffed', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <Text style={{ fontSize: 11 }}>
+              📦 {(compactionResult.originalSize / 1024).toFixed(0)}KB → {(compactionResult.compactedSize / 1024).toFixed(0)}KB
+            </Text>
+            <Tag color="green" style={{ fontSize: 10 }}>-{compactionResult.reductionPercent}%</Tag>
+          </div>
+          <Text type="secondary" style={{ fontSize: 10 }}>
+            ~{estimateTokens(compactionResult.html).toLocaleString()} tokens
+          </Text>
+          {compactionResult.warnings.length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {compactionResult.warnings.map((w, i) => (
+                <Alert key={i} type="warning" message={w} style={{ fontSize: 10, padding: '2px 8px', marginTop: 2 }} showIcon />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Progress Steps - Show during generation */}
       {generationStage !== 'idle' && (
