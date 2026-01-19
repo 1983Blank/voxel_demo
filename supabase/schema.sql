@@ -467,20 +467,23 @@ create trigger prototypes_updated_at
   for each row execute function update_updated_at();
 
 -- ============================================
--- LLM API KEYS TABLE (with Vault integration)
+-- LLM API KEYS TABLE (with pgcrypto encryption)
 -- Securely stores API keys for AI providers
 -- ============================================
 
--- Enable the vault extension (must be done by Supabase - it's already available)
--- The vault stores encrypted secrets and returns a UUID reference
+-- Enable pgcrypto extension for encryption
+create extension if not exists pgcrypto;
 
-create table if not exists user_api_keys (
+-- Drop old table if exists (for migration)
+drop table if exists user_api_keys cascade;
+
+create table user_api_keys (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid references auth.users(id) on delete cascade not null,
   provider text not null check (provider in ('anthropic', 'openai', 'google')),
   key_name text not null default 'Default',
-  -- Store the vault secret ID, not the actual key
-  vault_secret_id uuid not null,
+  -- Store the encrypted API key directly
+  encrypted_key text not null,
   model text,
   is_active boolean default true,
   created_at timestamptz default now(),
@@ -511,16 +514,36 @@ create policy "Users can delete own API keys"
   using (auth.uid() = user_id);
 
 -- Trigger for updated_at
+drop trigger if exists user_api_keys_updated_at on user_api_keys;
 create trigger user_api_keys_updated_at
   before update on user_api_keys
   for each row execute function update_updated_at();
 
 -- ============================================
--- VAULT HELPER FUNCTIONS
+-- API KEY HELPER FUNCTIONS
 -- Functions to safely store and retrieve API keys
+-- Uses pgcrypto with a server-side encryption key
 -- ============================================
 
--- Function to store an API key in the vault and return the secret ID
+-- IMPORTANT: Set this encryption key as a Supabase secret
+-- In Supabase Dashboard > Settings > Edge Functions > Secrets
+-- Or use: SELECT set_config('app.encryption_key', 'your-32-char-secret-key-here!!', false);
+-- For production, store this in vault.secrets and retrieve it
+
+-- Function to get the encryption key (set this up in your environment)
+create or replace function get_encryption_key()
+returns text as $$
+begin
+  -- Try to get from session config first (for testing)
+  -- In production, you should use a proper secret management approach
+  return coalesce(
+    current_setting('app.encryption_key', true),
+    'voxel-default-key-change-in-prod!'  -- 32 chars, CHANGE THIS IN PRODUCTION
+  );
+end;
+$$ language plpgsql stable security definer;
+
+-- Function to store an API key (encrypted)
 create or replace function store_api_key(
   p_user_id uuid,
   p_provider text,
@@ -530,86 +553,62 @@ create or replace function store_api_key(
 )
 returns uuid as $$
 declare
-  v_secret_id uuid;
-  v_existing_id uuid;
+  v_encrypted text;
+  v_key_id uuid;
 begin
-  -- Check if user already has a key for this provider
-  select vault_secret_id into v_existing_id
-  from user_api_keys
+  -- Encrypt the API key
+  v_encrypted := encode(
+    pgp_sym_encrypt(p_api_key, get_encryption_key()),
+    'base64'
+  );
+
+  -- Delete existing key for this provider if exists
+  delete from user_api_keys
   where user_id = p_user_id and provider = p_provider;
 
-  -- If exists, delete the old vault secret first
-  if v_existing_id is not null then
-    -- Delete old secret from vault
-    delete from vault.secrets where id = v_existing_id;
-    -- Delete old record
-    delete from user_api_keys where user_id = p_user_id and provider = p_provider;
-  end if;
+  -- Insert new key
+  insert into user_api_keys (user_id, provider, key_name, encrypted_key, model, is_active)
+  values (p_user_id, p_provider, p_key_name, v_encrypted, p_model, true)
+  returning id into v_key_id;
 
-  -- Create a new vault secret
-  insert into vault.secrets (secret, name, description)
-  values (
-    p_api_key,
-    p_provider || '_key_' || p_user_id,
-    'API key for ' || p_provider || ' - User: ' || p_user_id
-  )
-  returning id into v_secret_id;
-
-  -- Store reference in user_api_keys
-  insert into user_api_keys (user_id, provider, key_name, vault_secret_id, model)
-  values (p_user_id, p_provider, p_key_name, v_secret_id, p_model);
-
-  return v_secret_id;
+  return v_key_id;
 end;
 $$ language plpgsql security definer;
 
--- Function to retrieve an API key from the vault
+-- Function to retrieve a decrypted API key
 create or replace function get_api_key(p_user_id uuid, p_provider text)
 returns text as $$
 declare
-  v_secret_id uuid;
-  v_api_key text;
+  v_encrypted text;
+  v_decrypted text;
 begin
-  -- Get the vault secret ID
-  select vault_secret_id into v_secret_id
+  -- Get the encrypted key
+  select encrypted_key into v_encrypted
   from user_api_keys
   where user_id = p_user_id and provider = p_provider and is_active = true;
 
-  if v_secret_id is null then
+  if v_encrypted is null then
     return null;
   end if;
 
-  -- Get the decrypted secret from vault
-  select decrypted_secret into v_api_key
-  from vault.decrypted_secrets
-  where id = v_secret_id;
+  -- Decrypt and return
+  v_decrypted := pgp_sym_decrypt(
+    decode(v_encrypted, 'base64'),
+    get_encryption_key()
+  );
 
-  return v_api_key;
+  return v_decrypted;
 end;
 $$ language plpgsql security definer;
 
 -- Function to delete an API key
 create or replace function delete_api_key(p_user_id uuid, p_provider text)
 returns boolean as $$
-declare
-  v_secret_id uuid;
 begin
-  -- Get the vault secret ID
-  select vault_secret_id into v_secret_id
-  from user_api_keys
+  delete from user_api_keys
   where user_id = p_user_id and provider = p_provider;
 
-  if v_secret_id is null then
-    return false;
-  end if;
-
-  -- Delete from vault
-  delete from vault.secrets where id = v_secret_id;
-
-  -- Delete from user_api_keys (cascade should handle this but be explicit)
-  delete from user_api_keys where user_id = p_user_id and provider = p_provider;
-
-  return true;
+  return found;
 end;
 $$ language plpgsql security definer;
 
