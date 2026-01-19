@@ -154,42 +154,23 @@ export async function saveApiKey(params: SaveApiKeyParams): Promise<void> {
     return;
   }
 
-  // Refresh session to ensure we have a valid token
-  const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
-  if (sessionError || !session) {
-    console.error('Session error:', sessionError);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     throw new Error('You must be logged in to save API keys');
   }
 
-  // Call Edge Function directly with fetch (more reliable auth)
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  console.log('[apiKeysService] Using token:', session.access_token?.substring(0, 20) + '...');
-
-  const response = await fetch(`${supabaseUrl}/functions/v1/store-api-key`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${session.access_token}`,
-      'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify({
-      provider,
-      apiKey,
-      keyName,
-      model: model || providerInfo.defaultModel,
-    }),
+  // Call the vault function via RPC
+  const { error } = await supabase.rpc('store_api_key', {
+    p_user_id: user.id,
+    p_provider: provider,
+    p_api_key: apiKey,
+    p_key_name: keyName,
+    p_model: model || providerInfo.defaultModel,
   });
 
-  const data = await response.json();
-  console.log('[apiKeysService] Edge Function response:', data);
-
-  if (!response.ok) {
-    console.error('Error saving API key:', data);
-    throw new Error(`Failed to save API key: ${data.error || response.statusText}`);
-  }
-
-  if (!data?.success) {
-    throw new Error(data?.error || data?.details || 'Failed to save API key');
+  if (error) {
+    console.error('Error saving API key:', error);
+    throw new Error(`Failed to save API key: ${error.message}`);
   }
 }
 
@@ -217,34 +198,20 @@ export async function deleteApiKey(provider: LLMProvider): Promise<void> {
     return;
   }
 
-  // Refresh session to ensure we have a valid token
-  const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
-  if (sessionError || !session) {
-    console.error('Session error:', sessionError);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     throw new Error('You must be logged in to delete API keys');
   }
 
-  // Call Edge Function directly with fetch
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const response = await fetch(`${supabaseUrl}/functions/v1/delete-api-key`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${session.access_token}`,
-      'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify({ provider }),
+  // Call the vault function via RPC
+  const { error } = await supabase.rpc('delete_api_key', {
+    p_user_id: user.id,
+    p_provider: provider,
   });
 
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error('Error deleting API key:', data);
-    throw new Error(`Failed to delete API key: ${data.error || response.statusText}`);
-  }
-
-  if (!data?.success) {
-    throw new Error(data?.error || 'Failed to delete API key');
+  if (error) {
+    console.error('Error deleting API key:', error);
+    throw new Error(`Failed to delete API key: ${error.message}`);
   }
 }
 

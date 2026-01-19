@@ -19,22 +19,22 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
+    // Get JWT from auth header
     const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      throw new Error('Missing authorization header')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      throw new Error('Missing or invalid authorization header')
     }
+    const jwt = authHeader.replace('Bearer ', '')
 
-    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    })
-
+    // Service client for all operations
     const supabaseService = createClient(supabaseUrl, supabaseServiceKey)
 
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser()
+    // Verify user using service client with the JWT
+    const { data: { user }, error: userError } = await supabaseService.auth.getUser(jwt)
     if (userError || !user) {
-      throw new Error('Unauthorized')
+      console.error('[delete-api-key] Auth error:', userError)
+      throw new Error(`Unauthorized: ${userError?.message || 'Invalid token'}`)
     }
 
     const body: DeleteKeyRequest = await req.json()
