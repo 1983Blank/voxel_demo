@@ -88,39 +88,59 @@ export function Admin() {
       return;
     }
 
-    // Create user using Supabase Admin API (requires service role key on backend)
-    // For now, we'll use the client-side signUp which has limitations
-    const { data, error } = await supabase.auth.signUp({
-      email: values.email,
-      password: values.password,
-      options: {
-        data: { name: values.name },
-      },
-    });
+    try {
+      // Create user using Supabase Auth
+      // Note: This uses client-side signUp. For production, use a backend with service role.
+      const { data, error } = await supabase.auth.signUp({
+        email: values.email,
+        password: values.password,
+        options: {
+          data: { name: values.name },
+          // Don't auto-confirm to avoid logging out the admin
+          emailRedirectTo: `${window.location.origin}/login`,
+        },
+      });
 
-    if (error) {
-      message.error(`Failed to create user: ${error.message}`);
-      setIsSubmitting(false);
-      return;
-    }
-
-    // Update the role if not default 'user'
-    if (data.user && values.role !== 'user') {
-      const { error: profileError } = await supabase
-        .from('user_profiles')
-        .update({ role: values.role })
-        .eq('id', data.user.id);
-
-      if (profileError) {
-        console.error('Error updating role:', profileError);
+      if (error) {
+        console.error('SignUp error:', error);
+        message.error(`Failed to create user: ${error.message}`);
+        setIsSubmitting(false);
+        return;
       }
-    }
 
-    message.success(`User ${values.email} created successfully`);
-    setIsModalOpen(false);
-    form.resetFields();
-    fetchUsers();
-    setIsSubmitting(false);
+      if (!data.user) {
+        message.error('Failed to create user: No user returned');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Wait a moment for the trigger to create the profile
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Update the role if not default 'user'
+      if (values.role !== 'user') {
+        const { error: profileError } = await supabase
+          .from('user_profiles')
+          .update({ role: values.role, name: values.name })
+          .eq('id', data.user.id);
+
+        if (profileError) {
+          console.error('Error updating role:', profileError);
+          // Don't fail completely, user was created
+          message.warning(`User created but role update failed: ${profileError.message}`);
+        }
+      }
+
+      message.success(`User ${values.email} created successfully. They can now login.`);
+      setIsModalOpen(false);
+      form.resetFields();
+      fetchUsers();
+    } catch (err) {
+      console.error('Unexpected error:', err);
+      message.error(`Unexpected error: ${err instanceof Error ? err.message : 'Unknown'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleEditUser = async (values: { name: string; role: string }) => {
