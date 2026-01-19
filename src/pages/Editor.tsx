@@ -14,6 +14,7 @@ import {
   message,
   Spin,
   Segmented,
+  Modal,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -368,9 +369,19 @@ function AIPromptPanel() {
   );
 }
 
+interface ToolbarState {
+  visible: boolean;
+  x: number;
+  y: number;
+  elementType: string;
+  isImage: boolean;
+}
+
 function VisualEditor() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedElementRef = useRef<Element | null>(null);
   const {
     currentHtml,
     updateHtml,
@@ -379,6 +390,30 @@ function VisualEditor() {
     zoom,
     showGrid,
   } = useEditorStore();
+
+  // Toolbar state
+  const [toolbar, setToolbar] = useState<ToolbarState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    elementType: '',
+    isImage: false,
+  });
+
+  // Image modal state
+  const [imageModal, setImageModal] = useState<{
+    visible: boolean;
+    currentSrc: string;
+  }>({
+    visible: false,
+    currentSrc: '',
+  });
+  const [newImageUrl, setNewImageUrl] = useState('');
+
+  // Hide toolbar
+  const hideToolbar = useCallback(() => {
+    setToolbar(prev => ({ ...prev, visible: false }));
+  }, []);
 
   // Debounced save function - only saves after user stops typing
   const debouncedSave = useCallback((iframeDoc: Document) => {
@@ -389,13 +424,95 @@ function VisualEditor() {
       const newHtml = iframeDoc.documentElement.outerHTML;
       const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
       updateHtml(cleanHtml);
-    }, 800); // Save after 800ms of no typing
+    }, 800);
   }, [updateHtml]);
+
+  // Handle image replacement
+  const handleReplaceImage = () => {
+    const iframe = iframeRef.current;
+    if (!iframe || !newImageUrl.trim()) return;
+
+    const iframeDoc = iframe.contentDocument;
+    if (!iframeDoc) return;
+
+    const selected = iframeDoc.querySelector('[data-voxel-selected="true"]') as HTMLImageElement;
+    if (selected && selected.tagName === 'IMG') {
+      selected.src = newImageUrl.trim();
+
+      const newHtml = iframeDoc.documentElement.outerHTML;
+      const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
+      updateHtml(cleanHtml);
+
+      setImageModal({ visible: false, currentSrc: '' });
+      setNewImageUrl('');
+      message.success('Image replaced!');
+    }
+  };
+
+  // Handle delete element
+  const handleDeleteElement = () => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const iframeDoc = iframe.contentDocument;
+    if (!iframeDoc) return;
+
+    const selected = iframeDoc.querySelector('[data-voxel-selected="true"]');
+    if (selected) {
+      selected.remove();
+      setSelectedElement(null, null);
+      hideToolbar();
+
+      const newHtml = iframeDoc.documentElement.outerHTML;
+      const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
+      updateHtml(cleanHtml);
+      message.success('Element deleted');
+    }
+  };
+
+  // Handle edit text
+  const handleEditText = () => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const iframeDoc = iframe.contentDocument;
+    if (!iframeDoc) return;
+
+    const selected = iframeDoc.querySelector('[data-voxel-selected="true"]') as HTMLElement;
+    if (selected) {
+      selected.setAttribute('contenteditable', 'true');
+      selected.focus();
+      hideToolbar();
+    }
+  };
+
+  // Handle duplicate element
+  const handleDuplicateElement = () => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const iframeDoc = iframe.contentDocument;
+    if (!iframeDoc) return;
+
+    const selected = iframeDoc.querySelector('[data-voxel-selected="true"]');
+    if (selected && selected.parentElement) {
+      const clone = selected.cloneNode(true) as Element;
+      clone.removeAttribute('data-voxel-selected');
+      selected.parentElement.insertBefore(clone, selected.nextSibling);
+
+      const newHtml = iframeDoc.documentElement.outerHTML;
+      const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
+      updateHtml(cleanHtml);
+      hideToolbar();
+      message.success('Element duplicated');
+    }
+  };
 
   // Inject editor styles and scripts into iframe
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (!iframe || !currentHtml) return;
+    const container = containerRef.current;
+    if (!iframe || !currentHtml || !container) return;
 
     const iframeDoc = iframe.contentDocument;
     if (!iframeDoc) return;
@@ -425,6 +542,9 @@ function VisualEditor() {
           outline: 2px solid #1890ff !important;
           background: rgba(24, 144, 255, 0.05);
         }
+        img {
+          cursor: pointer !important;
+        }
       </style>
     `;
 
@@ -432,6 +552,23 @@ function VisualEditor() {
     iframeDoc.open();
     iframeDoc.write(currentHtml.replace('</head>', editorStyles + '</head>'));
     iframeDoc.close();
+
+    // Get element path for display
+    const getPath = (el: Element): string => {
+      const pathParts: string[] = [];
+      let curr: Element | null = el;
+      while (curr && curr !== document.body) {
+        let selector = curr.tagName.toLowerCase();
+        if (curr.id) {
+          selector += `#${curr.id}`;
+        } else if (curr.className && typeof curr.className === 'string') {
+          selector += `.${curr.className.split(' ').filter(Boolean).join('.')}`;
+        }
+        pathParts.unshift(selector);
+        curr = curr.parentElement;
+      }
+      return pathParts.join(' > ');
+    };
 
     // Add event listeners
     const handleClick = (e: MouseEvent) => {
@@ -441,6 +578,8 @@ function VisualEditor() {
       const target = e.target as Element;
       if (!target || target === iframeDoc.body || target === iframeDoc.documentElement) {
         setSelectedElement(null, null);
+        selectedElementRef.current = null;
+        hideToolbar();
         return;
       }
 
@@ -451,39 +590,53 @@ function VisualEditor() {
 
       // Set new selection
       target.setAttribute('data-voxel-selected', 'true');
-
-      // Get element path for display
-      const getPath = (el: Element): string => {
-        const pathParts: string[] = [];
-        let curr: Element | null = el;
-        while (curr && curr !== document.body) {
-          let selector = curr.tagName.toLowerCase();
-          if (curr.id) {
-            selector += `#${curr.id}`;
-          } else if (curr.className) {
-            selector += `.${curr.className.split(' ').join('.')}`;
-          }
-          pathParts.unshift(selector);
-          curr = curr.parentElement;
-        }
-        return pathParts.join(' > ');
-      };
+      selectedElementRef.current = target;
 
       const path = getPath(target);
       setSelectedElement(path, target.outerHTML);
+      hideToolbar();
+    };
 
-      // If in edit mode, make element editable
-      if (editorMode === 'edit' && target.childNodes.length === 1 && target.childNodes[0].nodeType === Node.TEXT_NODE) {
-        target.setAttribute('contenteditable', 'true');
-        (target as HTMLElement).focus();
+    // Double-click to show toolbar
+    const handleDoubleClick = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const target = e.target as Element;
+      if (!target || target === iframeDoc.body || target === iframeDoc.documentElement) {
+        return;
       }
+
+      // Calculate position relative to container
+      const containerRect = container.getBoundingClientRect();
+
+      const x = e.clientX - containerRect.left;
+      const y = e.clientY - containerRect.top;
+
+      const isImage = target.tagName === 'IMG';
+      const elementType = target.tagName.toLowerCase();
+
+      // If it's an image, also open the image modal
+      if (isImage) {
+        setImageModal({
+          visible: true,
+          currentSrc: (target as HTMLImageElement).src,
+        });
+      }
+
+      setToolbar({
+        visible: true,
+        x: Math.min(x, containerRect.width - 200),
+        y: Math.max(y - 50, 10),
+        elementType,
+        isImage,
+      });
     };
 
     const handleMouseOver = (e: MouseEvent) => {
       const target = e.target as Element;
       if (!target || target === iframeDoc.body || target === iframeDoc.documentElement) return;
 
-      // Clear previous hover
       iframeDoc.querySelectorAll('[data-voxel-hovered]').forEach((el) => {
         el.removeAttribute('data-voxel-hovered');
       });
@@ -498,14 +651,12 @@ function VisualEditor() {
     };
 
     const handleInput = () => {
-      // Debounce save - don't refresh on every keystroke
       debouncedSave(iframeDoc);
     };
 
     const handleBlur = (e: FocusEvent) => {
       const target = e.target as Element;
       if (target?.hasAttribute('contenteditable')) {
-        // Clear any pending debounce and save immediately on blur
         if (debounceTimerRef.current) {
           clearTimeout(debounceTimerRef.current);
         }
@@ -517,26 +668,29 @@ function VisualEditor() {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Delete selected element
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const selected = iframeDoc.querySelector('[data-voxel-selected="true"]');
         if (selected && !selected.hasAttribute('contenteditable')) {
           selected.remove();
           setSelectedElement(null, null);
-          updateHtml(iframeDoc.documentElement.outerHTML);
+          hideToolbar();
+          const newHtml = iframeDoc.documentElement.outerHTML;
+          const cleanHtml = newHtml.replace(/<style id="voxel-editor-styles">[\s\S]*?<\/style>/, '');
+          updateHtml(cleanHtml);
         }
       }
 
-      // Escape to deselect
       if (e.key === 'Escape') {
         iframeDoc.querySelectorAll('[contenteditable]').forEach((el) => {
           el.removeAttribute('contenteditable');
         });
         setSelectedElement(null, null);
+        hideToolbar();
       }
     };
 
     iframeDoc.addEventListener('click', handleClick);
+    iframeDoc.addEventListener('dblclick', handleDoubleClick);
     iframeDoc.addEventListener('mouseover', handleMouseOver);
     iframeDoc.addEventListener('mouseout', handleMouseOut);
     iframeDoc.addEventListener('input', handleInput);
@@ -548,16 +702,18 @@ function VisualEditor() {
         clearTimeout(debounceTimerRef.current);
       }
       iframeDoc.removeEventListener('click', handleClick);
+      iframeDoc.removeEventListener('dblclick', handleDoubleClick);
       iframeDoc.removeEventListener('mouseover', handleMouseOver);
       iframeDoc.removeEventListener('mouseout', handleMouseOut);
       iframeDoc.removeEventListener('input', handleInput);
       iframeDoc.removeEventListener('blur', handleBlur, true);
       iframeDoc.removeEventListener('keydown', handleKeyDown);
     };
-  }, [currentHtml, editorMode, showGrid, setSelectedElement, updateHtml, debouncedSave]);
+  }, [currentHtml, editorMode, showGrid, setSelectedElement, updateHtml, debouncedSave, hideToolbar]);
 
   return (
     <div
+      ref={containerRef}
       style={{
         flex: 1,
         background: '#f0f0f0',
@@ -566,8 +722,117 @@ function VisualEditor() {
         justifyContent: 'center',
         overflow: 'auto',
         padding: 24,
+        position: 'relative',
       }}
     >
+      {/* Floating Toolbar */}
+      {toolbar.visible && (
+        <div
+          style={{
+            position: 'absolute',
+            left: toolbar.x,
+            top: toolbar.y,
+            zIndex: 1000,
+            background: 'white',
+            borderRadius: 8,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            padding: 8,
+            display: 'flex',
+            gap: 4,
+          }}
+        >
+          <Tooltip title="Edit Text">
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={handleEditText}
+            />
+          </Tooltip>
+          {toolbar.isImage && (
+            <Tooltip title="Change Image">
+              <Button
+                type="text"
+                size="small"
+                icon={<AppstoreOutlined />}
+                onClick={() => setImageModal({ visible: true, currentSrc: '' })}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title="Duplicate">
+            <Button
+              type="text"
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={handleDuplicateElement}
+            />
+          </Tooltip>
+          <Tooltip title="Delete">
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={handleDeleteElement}
+            />
+          </Tooltip>
+          <Divider type="vertical" style={{ margin: '0 4px' }} />
+          <Tag style={{ margin: 0, fontSize: 10 }}>{toolbar.elementType}</Tag>
+        </div>
+      )}
+
+      {/* Image Replace Modal */}
+      <Modal
+        title="Replace Image"
+        open={imageModal.visible}
+        onCancel={() => {
+          setImageModal({ visible: false, currentSrc: '' });
+          setNewImageUrl('');
+        }}
+        onOk={handleReplaceImage}
+        okText="Replace"
+        okButtonProps={{ disabled: !newImageUrl.trim() }}
+      >
+        {imageModal.currentSrc && (
+          <div style={{ marginBottom: 16 }}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              Current image:
+            </Text>
+            <img
+              src={imageModal.currentSrc}
+              alt="Current"
+              style={{ maxWidth: '100%', maxHeight: 150, borderRadius: 8, border: '1px solid #eee' }}
+            />
+          </div>
+        )}
+        <div>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            Enter new image URL:
+          </Text>
+          <Input
+            placeholder="https://example.com/image.jpg"
+            value={newImageUrl}
+            onChange={(e) => setNewImageUrl(e.target.value)}
+            onPressEnter={handleReplaceImage}
+          />
+          {newImageUrl && (
+            <div style={{ marginTop: 12 }}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                Preview:
+              </Text>
+              <img
+                src={newImageUrl}
+                alt="Preview"
+                style={{ maxWidth: '100%', maxHeight: 150, borderRadius: 8, border: '1px solid #eee' }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            </div>
+          )}
+        </div>
+      </Modal>
+
       <div
         style={{
           width: `${zoom}%`,
