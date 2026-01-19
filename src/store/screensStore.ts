@@ -12,10 +12,13 @@ interface ScreensState {
   isLoading: boolean;
   isSyncing: boolean;
   selectedIds: string[]; // For batch operations
+  isLoadingVersions: boolean;
 
   // Actions
   initializeScreens: () => Promise<void>;
   fetchFromSupabase: () => Promise<void>;
+  fetchVersionsFromSupabase: (screenId: string) => Promise<ScreenVersion[]>;
+  restoreVersionAsync: (screenId: string, versionId: string) => Promise<void>;
   setScreens: (screens: CapturedScreen[]) => void;
   addScreen: (screen: CapturedScreen) => void;
   uploadScreen: (file: File, name?: string, tags?: string[]) => Promise<CapturedScreen | null>;
@@ -60,6 +63,7 @@ export const useScreensStore = create<ScreensState>()(
       isLoading: false,
       isSyncing: false,
       selectedIds: [],
+      isLoadingVersions: false,
 
       initializeScreens: async () => {
         const state = get();
@@ -92,9 +96,10 @@ export const useScreensStore = create<ScreensState>()(
           return;
         }
 
+        // Fetch screens with their versions
         const { data, error } = await supabase
           .from('screens')
-          .select('*')
+          .select(`*, screen_versions (id, html, prompt, description, created_at)`)
           .order('created_at', { ascending: false });
 
         if (error) {
@@ -113,9 +118,113 @@ export const useScreensStore = create<ScreensState>()(
           tags: row.tags || [],
           editedHtml: row.html || undefined,
           updatedAt: row.updated_at,
+          versions: (row.screen_versions || []).map((v: { id: string; html: string; prompt?: string; description?: string; created_at: string }) => ({
+            id: v.id,
+            html: v.html,
+            prompt: v.prompt,
+            description: v.description,
+            createdAt: v.created_at,
+          })).sort((a: ScreenVersion, b: ScreenVersion) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          ),
         }));
 
         set({ screens });
+      },
+
+      fetchVersionsFromSupabase: async (screenId: string) => {
+        if (!isSupabaseConfigured()) {
+          return [];
+        }
+
+        set({ isLoadingVersions: true });
+
+        try {
+          const { data, error } = await supabase
+            .from('screen_versions')
+            .select('*')
+            .eq('screen_id', screenId)
+            .order('created_at', { ascending: false });
+
+          if (error) {
+            console.error('Error fetching versions:', error);
+            throw error;
+          }
+
+          const versions: ScreenVersion[] = (data || []).map((v) => ({
+            id: v.id,
+            html: v.html,
+            prompt: v.prompt,
+            description: v.description,
+            createdAt: v.created_at,
+          }));
+
+          // Update the screen's versions in state
+          set((state) => ({
+            screens: state.screens.map((s) =>
+              s.id === screenId ? { ...s, versions } : s
+            ),
+          }));
+
+          return versions;
+        } finally {
+          set({ isLoadingVersions: false });
+        }
+      },
+
+      restoreVersionAsync: async (screenId: string, versionId: string) => {
+        const screen = get().screens.find((s) => s.id === screenId);
+        if (!screen) {
+          throw new Error('Screen not found');
+        }
+
+        const version = screen.versions?.find((v) => v.id === versionId);
+        if (!version) {
+          throw new Error('Version not found');
+        }
+
+        if (isSupabaseConfigured()) {
+          // Update screen's HTML with version content
+          const { error: updateError } = await supabase
+            .from('screens')
+            .update({ html: version.html })
+            .eq('id', screenId);
+
+          if (updateError) {
+            console.error('Error restoring version:', updateError);
+            throw new Error(`Failed to restore: ${updateError.message}`);
+          }
+
+          // Create a new version record tracking the restore action
+          const { error: versionError } = await supabase
+            .from('screen_versions')
+            .insert({
+              screen_id: screenId,
+              html: version.html,
+              description: `Restored from version ${versionId}`,
+            });
+
+          if (versionError) {
+            console.warn('Could not create restore version record:', versionError);
+          }
+
+          // Refetch versions to update state
+          await get().fetchVersionsFromSupabase(screenId);
+        }
+
+        // Update local state
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === screenId
+              ? {
+                  ...s,
+                  editedHtml: version.html,
+                  currentVersionId: versionId,
+                  updatedAt: new Date().toISOString(),
+                }
+              : s
+          ),
+        }));
       },
 
       setScreens: (screens) => set({ screens }),

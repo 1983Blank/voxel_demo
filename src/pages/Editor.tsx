@@ -87,6 +87,7 @@ import {
   type CompactionMethod,
   type CompactionResult,
 } from '@/services/htmlCompactor';
+import { VersionHistoryPanel } from '@/components/VersionHistoryPanel';
 
 const { Sider } = Layout;
 const { TextArea } = Input;
@@ -2021,6 +2022,9 @@ export function Editor() {
     getNextScreen,
     getPreviousScreen,
     getScreenVersions,
+    fetchVersionsFromSupabase,
+    restoreVersionAsync,
+    isLoadingVersions,
   } = useScreensStore();
   const {
     loadScreen,
@@ -2170,10 +2174,37 @@ export function Editor() {
     initializeScreens();
   }, [initializeScreens]);
 
+  // Load versions when screen changes
+  useEffect(() => {
+    if (screenId) {
+      fetchVersionsFromSupabase(screenId).catch(console.error);
+    }
+  }, [screenId, fetchVersionsFromSupabase]);
+
   const screen = screens.find((s) => s.id === screenId);
   const nextScreen = screenId ? getNextScreen(screenId) : null;
   const prevScreen = screenId ? getPreviousScreen(screenId) : null;
   const versions = screenId ? getScreenVersions(screenId) : [];
+
+  // Handle version preview
+  const handleVersionPreview = useCallback((version: { id: string; html: string }) => {
+    console.log('[Editor] Previewing version:', version.id);
+  }, []);
+
+  // Handle version restore
+  const handleVersionRestore = useCallback(async (version: { id: string; html: string }) => {
+    if (!screenId) return;
+
+    try {
+      await restoreVersionAsync(screenId, version.id);
+      // Update editor with restored content
+      updateHtml(version.html);
+      message.success('Version restored successfully!');
+    } catch (error) {
+      console.error('Failed to restore version:', error);
+      message.error(`Failed to restore version: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [screenId, restoreVersionAsync, updateHtml]);
 
   // Load screen content
   useEffect(() => {
@@ -2405,21 +2436,32 @@ export function Editor() {
           />
         )}
 
-        {/* Right Panel - Property Editor */}
+        {/* Right Panel - Property Editor + Version History */}
         <Sider
           width={300}
           theme="light"
-          style={{ borderLeft: '1px solid #f0f0f0', overflow: 'hidden' }}
+          style={{ borderLeft: '1px solid #f0f0f0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
         >
-          <PropertyPanel
-            elementProps={selectedElementProps}
-            element={selectedElement}
-            onUpdateStyle={handleUpdateStyle}
-            onUpdateAttribute={handleUpdateAttribute}
-            onDelete={handleDeleteElement}
-            onDuplicate={handleDuplicateElement}
-            onOpenImageModal={handleOpenImageModal}
-          />
+          <div style={{ flex: '0 0 auto', maxHeight: '50%', overflow: 'auto' }}>
+            <PropertyPanel
+              elementProps={selectedElementProps}
+              element={selectedElement}
+              onUpdateStyle={handleUpdateStyle}
+              onUpdateAttribute={handleUpdateAttribute}
+              onDelete={handleDeleteElement}
+              onDuplicate={handleDuplicateElement}
+              onOpenImageModal={handleOpenImageModal}
+            />
+          </div>
+          <div style={{ flex: 1, borderTop: '1px solid #f0f0f0', overflow: 'hidden' }}>
+            <VersionHistoryPanel
+              versions={versions}
+              currentHtml={currentHtml || undefined}
+              isLoading={isLoadingVersions}
+              onPreview={handleVersionPreview}
+              onRestore={handleVersionRestore}
+            />
+          </div>
         </Sider>
       </Layout>
     </Layout>
