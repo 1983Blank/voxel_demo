@@ -321,8 +321,8 @@ async function libMinifier(html: string): Promise<string> {
       removeComments: true,
       removeRedundantAttributes: true,
       removeEmptyAttributes: true,
-      minifyCSS: true,
-      minifyJS: true,
+      minifyCSS: false,  // clean-css doesn't work in browser (requires Node.js process)
+      minifyJS: false,   // terser may have browser compatibility issues
     });
   } catch (error) {
     console.warn('[Compactor] html-minifier-terser failed:', error);
@@ -343,8 +343,8 @@ async function libMinifierAggressive(html: string): Promise<string> {
       removeOptionalTags: true,
       removeScriptTypeAttributes: true,
       removeStyleLinkTypeAttributes: true,
-      minifyCSS: true,
-      minifyJS: true,
+      minifyCSS: false,  // clean-css doesn't work in browser (requires Node.js process)
+      minifyJS: false,   // terser may have browser compatibility issues
       minifyURLs: true,
       sortAttributes: true,
       sortClassName: true,
