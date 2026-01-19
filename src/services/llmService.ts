@@ -485,6 +485,26 @@ export async function generateHtml(
   console.log('[LLM] ✅ Step 3: User authenticated');
   console.log('[LLM] 📦 Step 3b: Access token present:', !!session.access_token);
   console.log('[LLM] 📦 Step 3b: Token starts with:', session.access_token?.substring(0, 20) + '...');
+
+  // Pre-check: verify user has an API key configured
+  console.log('[LLM] 📦 Step 3c: Checking if API key is configured...');
+  try {
+    const { hasApiKeyConfigured } = await import('./apiKeysService');
+    const hasKey = await hasApiKeyConfigured();
+    console.log('[LLM] 📦 Step 3c: Has API key configured:', hasKey);
+    if (!hasKey) {
+      console.log('[LLM] ❌ No API key configured');
+      return {
+        html: request.currentHtml,
+        success: false,
+        error: 'No API key configured. Please add your API key in Settings.',
+      };
+    }
+  } catch (keyCheckError) {
+    console.log('[LLM] ⚠️ Could not check API key status:', keyCheckError);
+    // Continue anyway, let the Edge Function handle it
+  }
+
   console.log('[LLM] 📦 Step 4: Calling Edge Function...');
 
   try {
@@ -512,10 +532,39 @@ export async function generateHtml(
       console.log('[LLM] ❌ Error name:', error.name);
       console.log('[LLM] ❌ Error message:', error.message);
       console.log('[LLM] ❌ Error context:', (error as any).context);
+
+      // Extract actual error message from the Response body
+      let actualErrorMessage = error.message || 'Edge Function error';
+      const context = (error as any).context;
+      if (context && context instanceof Response) {
+        try {
+          // Clone the response in case body was already consumed
+          const clonedResponse = context.clone ? context.clone() : context;
+          const errorBody = await clonedResponse.json();
+          console.log('[LLM] ❌ Error body from Edge Function:', errorBody);
+          if (errorBody.error) {
+            actualErrorMessage = errorBody.error;
+          }
+        } catch (parseError) {
+          console.log('[LLM] ❌ Could not parse error body:', parseError);
+          // Try to read as text as fallback
+          try {
+            const textBody = await context.text();
+            console.log('[LLM] ❌ Error body as text:', textBody);
+            if (textBody) {
+              actualErrorMessage = textBody;
+            }
+          } catch {
+            // Body already consumed, can't read it
+            console.log('[LLM] ❌ Response body already consumed');
+          }
+        }
+      }
+
       return {
         html: request.currentHtml,
         success: false,
-        error: error.message || 'Edge Function error',
+        error: actualErrorMessage,
       };
     }
 
