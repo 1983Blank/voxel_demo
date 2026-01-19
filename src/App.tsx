@@ -2,7 +2,19 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, App as AntApp } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppLayout, AuthLayout } from '@/layouts';
-import { Dashboard, Users, Login } from '@/pages';
+import {
+  Dashboard,
+  Users,
+  Login,
+  Screens,
+  Components,
+  Editor,
+  Variants,
+  Context,
+  Analytics,
+  Collaborate,
+  SharedView,
+} from '@/pages';
 import { useAuthStore } from '@/store/authStore';
 
 const queryClient = new QueryClient({
@@ -17,8 +29,8 @@ const queryClient = new QueryClient({
 
 const theme = {
   token: {
-    colorPrimary: '#1890ff',
-    borderRadius: 6,
+    colorPrimary: '#764ba2',
+    borderRadius: 8,
   },
 };
 
@@ -36,7 +48,7 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/screens" replace />;
   }
 
   return <>{children}</>;
@@ -68,12 +80,28 @@ function App() {
                   </ProtectedRoute>
                 }
               >
-                <Route path="/" element={<Dashboard />} />
+                {/* Redirect root to screens */}
+                <Route path="/" element={<Navigate to="/screens" replace />} />
+
+                {/* Main Voxel Routes */}
+                <Route path="/screens" element={<Screens />} />
+                <Route path="/components" element={<Components />} />
+                <Route path="/editor/:screenId" element={<Editor />} />
+                <Route path="/variants/:screenId" element={<Variants />} />
+                <Route path="/context" element={<Context />} />
+                <Route path="/collaborate" element={<Collaborate />} />
+                <Route path="/analytics" element={<Analytics />} />
+
+                {/* Legacy routes (can be removed) */}
+                <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/users" element={<Users />} />
               </Route>
 
+              {/* Shared view (public) */}
+              <Route path="/view/:shareLink" element={<SharedView />} />
+
               {/* Catch all */}
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/screens" replace />} />
             </Routes>
           </BrowserRouter>
         </AntApp>

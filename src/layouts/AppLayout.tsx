@@ -1,29 +1,71 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Avatar, Dropdown, theme } from 'antd';
+import { Layout, Menu, Avatar, Dropdown, theme, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import {
-  DashboardOutlined,
-  UserOutlined,
+  PictureOutlined,
+  AppstoreOutlined,
+  ExperimentOutlined,
+  FileTextOutlined,
+  BarChartOutlined,
   SettingOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  UserOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 
 const { Header, Sider, Content } = Layout;
+const { Text } = Typography;
 
 const menuItems: MenuProps['items'] = [
   {
-    key: '/',
-    icon: <DashboardOutlined />,
-    label: 'Dashboard',
+    key: 'capture',
+    type: 'group',
+    label: 'CAPTURE',
+    children: [
+      {
+        key: '/screens',
+        icon: <PictureOutlined />,
+        label: 'Screens',
+      },
+      {
+        key: '/components',
+        icon: <AppstoreOutlined />,
+        label: 'Components',
+      },
+    ],
   },
   {
-    key: '/users',
-    icon: <UserOutlined />,
-    label: 'Users',
+    key: 'prototype',
+    type: 'group',
+    label: 'PROTOTYPE',
+    children: [
+      {
+        key: '/context',
+        icon: <FileTextOutlined />,
+        label: 'Product Context',
+      },
+      {
+        key: '/collaborate',
+        icon: <TeamOutlined />,
+        label: 'Collaborate',
+      },
+    ],
+  },
+  {
+    key: 'analyze',
+    type: 'group',
+    label: 'ANALYZE',
+    children: [
+      {
+        key: '/analytics',
+        icon: <BarChartOutlined />,
+        label: 'Analytics',
+      },
+    ],
   },
 ];
 
@@ -60,6 +102,13 @@ export function AppLayout() {
     },
   ];
 
+  // Get current selected key including editor/variants routes
+  const getSelectedKey = () => {
+    if (location.pathname.startsWith('/editor/')) return '/screens';
+    if (location.pathname.startsWith('/variants/')) return '/screens';
+    return location.pathname;
+  };
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider
@@ -67,6 +116,7 @@ export function AppLayout() {
         collapsible
         collapsed={collapsed}
         theme="light"
+        width={220}
         style={{
           borderRight: '1px solid #f0f0f0',
         }}
@@ -78,25 +128,34 @@ export function AppLayout() {
             alignItems: 'center',
             justifyContent: 'center',
             borderBottom: '1px solid #f0f0f0',
+            gap: 8,
           }}
         >
-          <h1
+          <div
             style={{
-              margin: 0,
-              fontSize: collapsed ? 16 : 20,
-              fontWeight: 600,
-              color: '#1890ff',
+              width: 32,
+              height: 32,
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            {collapsed ? 'S' : 'SaaS App'}
-          </h1>
+            <ExperimentOutlined style={{ color: 'white', fontSize: 18 }} />
+          </div>
+          {!collapsed && (
+            <Text strong style={{ fontSize: 18 }}>
+              Voxel
+            </Text>
+          )}
         </div>
         <Menu
           mode="inline"
-          selectedKeys={[location.pathname]}
+          selectedKeys={[getSelectedKey()]}
           items={menuItems}
           onClick={handleMenuClick}
-          style={{ borderRight: 0 }}
+          style={{ borderRight: 0, marginTop: 8 }}
         />
       </Sider>
       <Layout>
@@ -136,6 +195,7 @@ export function AppLayout() {
             background: colorBgContainer,
             borderRadius: borderRadiusLG,
             minHeight: 280,
+            overflow: 'auto',
           }}
         >
           <Outlet />

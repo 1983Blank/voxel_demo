@@ -1,14 +1,14 @@
-# SaaS Webapp - Project Guidelines
+# Voxel - AI Prototyping Tool
 
 ## Overview
 
-This is a desktop-first SaaS web application built with React, TypeScript, and Vite. It uses Ant Design as the primary UI component library.
+Voxel is a desktop-first AI prototyping tool for product teams. It enables teams to capture web UIs, extract components, generate prototypes using AI, and collaborate on designs.
 
 ## Tech Stack
 
 - **Framework**: React 18 with TypeScript
 - **Build Tool**: Vite
-- **UI Library**: Ant Design (antd)
+- **UI Library**: Ant Design (antd) - desktop-first
 - **Routing**: React Router v6
 - **State Management**: Zustand
 - **Server State**: TanStack Query (React Query)
@@ -20,99 +20,88 @@ This is a desktop-first SaaS web application built with React, TypeScript, and V
 ```
 src/
 ├── components/          # Reusable UI components
-│   ├── ui/              # Ant Design wrappers and custom components
-│   ├── DataTable/       # Reusable data table component
-│   └── EmptyState/      # Empty state component
-├── features/            # Feature-based modules
-│   ├── auth/            # Authentication feature
-│   ├── users/           # User management
-│   └── dashboard/       # Dashboard feature
 ├── layouts/             # Layout components
 │   ├── AppLayout.tsx    # Main app layout with sidebar
 │   └── AuthLayout.tsx   # Login/signup layout
 ├── pages/               # Page components (route-level)
+│   ├── Screens.tsx      # Browse/manage captured HTML screens
+│   ├── Components.tsx   # View extracted components
+│   ├── Editor.tsx       # WYSIWYG + AI prompt editor
+│   ├── Variants.tsx     # A/B/C/D variant comparison
+│   ├── Context.tsx      # Product context upload
+│   └── Analytics.tsx    # Engagement dashboard
 ├── services/            # API services
-│   ├── api.ts           # Axios instance
-│   └── endpoints/       # API endpoint functions
 ├── types/               # TypeScript types
-│   ├── api.ts           # API types
-│   └── models.ts        # Domain models
-├── hooks/               # Custom React hooks
+│   └── models.ts        # Domain models (CapturedScreen, Variant, etc.)
 ├── store/               # Zustand stores
-└── utils/               # Helper functions
+│   ├── authStore.ts     # Authentication state
+│   └── screensStore.ts  # Captured screens state
+├── hooks/               # Custom React hooks
+├── utils/               # Helper functions
+└── mock-captures/       # Captured HTML files from SingleFile
+    └── screens/         # HTML screen captures
 ```
+
+## Routes
+
+| Path | Component | Description |
+|------|-----------|-------------|
+| `/screens` | Screens | Browse/manage captured HTML screens |
+| `/components` | Components | View extracted components library |
+| `/editor/:screenId` | Editor | WYSIWYG + AI prompt editor |
+| `/variants/:screenId` | Variants | Compare A/B/C/D variants |
+| `/context` | Context | Upload product context (text/PDF/video) |
+| `/analytics` | Analytics | Track engagement and feedback |
+
+## MVP Features
+
+1. **Screens Page** - Browse/manage captured HTML screens with thumbnails
+2. **Component Library** - View extracted components from screens
+3. **Vibe Prototype** - AI prompt + WYSIWYG editor to modify screens
+4. **Multi-Variant Output** - Create and compare A/B/C/D variants
+5. **Product Context** - Upload text/PDF/video as context for AI
+6. **Multiplayer & Commenting** - Collaborate on published prototypes
+7. **Analytics Dashboard** - Track variant engagement
 
 ## Coding Conventions
 
 ### TypeScript
-
-- Use strict mode (enabled in tsconfig)
+- Use strict mode
 - Define types in `src/types/` for reusability
-- Prefer interfaces for object types, type aliases for unions/intersections
-- Use `type` imports when importing only types
+- Prefer interfaces for object types
 
 ### Components
-
 - Use function components with TypeScript
-- Export components as named exports
-- Keep components focused and single-purpose
-- Use Ant Design components as the foundation
+- Export as named exports
+- Use Ant Design components as foundation
 
 ### Styling
-
-- This is a **desktop-first** application
-- Use Ant Design's built-in styling and theming
-- Use inline styles or Ant Design's `style` prop for component-specific styles
-- Avoid external CSS files unless necessary
-- Theme customization is done in `App.tsx` via ConfigProvider
+- **Desktop-first** application (NOT mobile-first)
+- Use Ant Design's built-in styling
+- Use inline styles or style props
+- Theme customization via ConfigProvider
 
 ### State Management
-
-- **Local state**: Use `useState` for component-specific state
-- **Global state**: Use Zustand stores in `src/store/`
-- **Server state**: Use TanStack Query for API data fetching/caching
-
-### API Calls
-
-- All API calls go through the Axios instance in `src/services/api.ts`
-- Group endpoints by feature in `src/services/endpoints/`
-- Use TanStack Query hooks for data fetching in components
-
-### Forms
-
-- Use React Hook Form for form handling
-- Use Zod for form validation schemas
-- Integrate with Ant Design form components via Controller
+- **Local state**: `useState` for component-specific state
+- **Global state**: Zustand stores in `src/store/`
+- **Server state**: TanStack Query for API data
 
 ## Import Aliases
 
-Use the `@/` alias for absolute imports:
-
 ```typescript
 import { Button } from '@/components/ui';
-import { useAuthStore } from '@/store/authStore';
-import type { User } from '@/types';
+import { useScreensStore } from '@/store/screensStore';
+import type { CapturedScreen } from '@/types';
 ```
 
 ## Running the Project
 
 ```bash
-npm install     # Install dependencies
-npm run dev     # Start development server (port 3000)
+npm run dev     # Start dev server (port 3000)
 npm run build   # Build for production
-npm run preview # Preview production build
 npm run lint    # Run ESLint
 ```
 
-## Environment Variables
+## Mock Data
 
-Copy `.env.example` to `.env` and configure:
-
-- `VITE_API_BASE_URL`: Backend API base URL
-
-## Authentication Flow
-
-1. User visits protected route → redirected to `/login`
-2. User logs in → token stored in localStorage + Zustand
-3. Subsequent requests include Authorization header via Axios interceptor
-4. 401 responses trigger logout and redirect to login
+Captured screens are stored in `src/mock-captures/screens/` as HTML files from the SingleFile browser extension. The screensStore loads these as mock data.

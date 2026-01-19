@@ -1,0 +1,122 @@
+[
+  {
+    "id": "comp-001",
+    "name": "Primary Button",
+    "category": "buttons",
+    "sourceScreen": "screen-1",
+    "extractedAt": "2026-01-19T15:00:00Z",
+    "tags": ["button", "cta", "primary"],
+    "html": "<button class=\"btn-primary\">\n  Get Started\n</button>",
+    "css": ".btn-primary {\n  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\n  color: white;\n  padding: 12px 24px;\n  border: none;\n  border-radius: 8px;\n  font-weight: 600;\n  font-size: 16px;\n  cursor: pointer;\n  transition: transform 0.2s, box-shadow 0.2s;\n}\n\n.btn-primary:hover {\n  transform: translateY(-2px);\n  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);\n}"
+  },
+  {
+    "id": "comp-002",
+    "name": "Secondary Button",
+    "category": "buttons",
+    "sourceScreen": "screen-1",
+    "extractedAt": "2026-01-19T15:00:00Z",
+    "tags": ["button", "secondary", "outline"],
+    "html": "<button class=\"btn-secondary\">\n  Learn More\n</button>",
+    "css": ".btn-secondary {\n  background: transparent;\n  color: #764ba2;\n  padding: 12px 24px;\n  border: 2px solid #764ba2;\n  border-radius: 8px;\n  font-weight: 600;\n  font-size: 16px;\n  cursor: pointer;\n  transition: all 0.2s;\n}\n\n.btn-secondary:hover {\n  background: #764ba2;\n  color: white;\n}"
+  },
+  {
+    "id": "comp-003",
+    "name": "Feature Card",
+    "category": "cards",
+    "sourceScreen": "screen-2",
+    "extractedAt": "2026-01-19T15:01:00Z",
+    "tags": ["card", "feature", "icon"],
+    "html": "<div class=\"feature-card\">\n  <div class=\"feature-icon\">\n    <svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\">\n      <path d=\"M13 2L3 14h9l-1 8 10-12h-9l1-8z\"/>\n    </svg>\n  </div>\n  <h3 class=\"feature-title\">Lightning Fast</h3>\n  <p class=\"feature-desc\">Build prototypes in minutes, not hours.</p>\n</div>",
+    "css": ".feature-card {\n  background: white;\n  border-radius: 12px;\n  padding: 24px;\n  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);\n  transition: transform 0.2s, box-shadow 0.2s;\n}\n\n.feature-card:hover {\n  transform: translateY(-4px);\n  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);\n}\n\n.feature-icon {\n  width: 48px;\n  height: 48px;\n  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\n  border-radius: 12px;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: white;\n  margin-bottom: 16px;\n}\n\n.feature-title {\n  font-size: 18px;\n  font-weight: 600;\n  margin: 0 0 8px 0;\n  color: #1a1a2e;\n}\n\n.feature-desc {\n  font-size: 14px;\n  color: #666;\n  margin: 0;\n  line-height: 1.5;\n}"
+  },
+  {
+    "id": "comp-004",
+    "name": "Pricing Card",
+    "category": "cards",
+    "sourceScreen": "screen-3",
+    "extractedAt": "2026-01-19T15:02:00Z",
+    "tags": ["card", "pricing", "plan"],
+    "html": "<div class=\"pricing-card\">\n  <div class=\"pricing-header\">\n    <h3 class=\"plan-name\">Pro</h3>\n    <div class=\"plan-price\">\n      <span class=\"currency\">$</span>\n      <span class=\"amount\">29</span>\n      <span class=\"period\">/mo</span>\n    </div>\n  </div>\n  <ul class=\"plan-features\">\n    <li>Unlimited prototypes</li>\n    <li>AI-powered generation</li>\n    <li>Team collaboration</li>\n    <li>Priority support</li>\n  </ul>\n  <button class=\"btn-primary\">Get Started</button>\n</div>",
+    "css": ".pricing-card {\n  background: white;\n  border-radius: 16px;\n  padding: 32px;\n  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);\n  text-align: center;\n}\n\n.pricing-header {\n  margin-bottom: 24px;\n}\n\n.plan-name {\n  font-size: 20px;\n  font-weight: 600;\n  color: #764ba2;\n  margin: 0 0 12px 0;\n}\n\n.plan-price {\n  display: flex;\n  align-items: baseline;\n  justify-content: center;\n  gap: 2px;\n}\n\n.currency {\n  font-size: 24px;\n  color: #666;\n}\n\n.amount {\n  font-size: 48px;\n  font-weight: 700;\n  color: #1a1a2e;\n}\n\n.period {\n  font-size: 16px;\n  color: #666;\n}\n\n.plan-features {\n  list-style: none;\n  padding: 0;\n  margin: 0 0 24px 0;\n}\n\n.plan-features li {\n  padding: 12px 0;\n  border-bottom: 1px solid #f0f0f0;\n  color: #444;\n}\n\n.plan-features li:last-child {\n  border-bottom: none;\n}"
+  },
+  {
+    "id": "comp-005",
+    "name": "Text Input",
+    "category": "inputs",
+    "sourceScreen": "screen-4",
+    "extractedAt": "2026-01-19T15:03:00Z",
+    "tags": ["input", "text", "form"],
+    "html": "<div class=\"input-group\">\n  <label class=\"input-label\">Email Address</label>\n  <input type=\"email\" class=\"text-input\" placeholder=\"you@example.com\" />\n</div>",
+    "css": ".input-group {\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n}\n\n.input-label {\n  font-size: 14px;\n  font-weight: 500;\n  color: #374151;\n}\n\n.text-input {\n  padding: 12px 16px;\n  border: 1px solid #d1d5db;\n  border-radius: 8px;\n  font-size: 16px;\n  transition: border-color 0.2s, box-shadow 0.2s;\n}\n\n.text-input:focus {\n  outline: none;\n  border-color: #764ba2;\n  box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.1);\n}\n\n.text-input::placeholder {\n  color: #9ca3af;\n}"
+  },
+  {
+    "id": "comp-006",
+    "name": "Navigation Bar",
+    "category": "navigation",
+    "sourceScreen": "screen-1",
+    "extractedAt": "2026-01-19T15:04:00Z",
+    "tags": ["nav", "header", "menu"],
+    "html": "<nav class=\"navbar\">\n  <div class=\"nav-brand\">\n    <span class=\"brand-icon\">V</span>\n    <span class=\"brand-name\">Voxel</span>\n  </div>\n  <ul class=\"nav-links\">\n    <li><a href=\"#features\">Features</a></li>\n    <li><a href=\"#pricing\">Pricing</a></li>\n    <li><a href=\"#docs\">Docs</a></li>\n  </ul>\n  <button class=\"btn-primary\">Get Started</button>\n</nav>",
+    "css": ".navbar {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 16px 32px;\n  background: white;\n  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);\n}\n\n.nav-brand {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n}\n\n.brand-icon {\n  width: 32px;\n  height: 32px;\n  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\n  border-radius: 8px;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: white;\n  font-weight: 700;\n}\n\n.brand-name {\n  font-size: 20px;\n  font-weight: 600;\n  color: #1a1a2e;\n}\n\n.nav-links {\n  display: flex;\n  list-style: none;\n  gap: 32px;\n  margin: 0;\n  padding: 0;\n}\n\n.nav-links a {\n  color: #4b5563;\n  text-decoration: none;\n  font-weight: 500;\n  transition: color 0.2s;\n}\n\n.nav-links a:hover {\n  color: #764ba2;\n}"
+  },
+  {
+    "id": "comp-007",
+    "name": "Hero Section",
+    "category": "sections",
+    "sourceScreen": "screen-1",
+    "extractedAt": "2026-01-19T15:05:00Z",
+    "tags": ["hero", "header", "landing"],
+    "html": "<section class=\"hero\">\n  <h1 class=\"hero-title\">Build prototypes at the speed of thought</h1>\n  <p class=\"hero-subtitle\">Capture any UI, extract components, and generate interactive prototypes with AI.</p>\n  <div class=\"hero-actions\">\n    <button class=\"btn-primary\">Start Free Trial</button>\n    <button class=\"btn-secondary\">Watch Demo</button>\n  </div>\n</section>",
+    "css": ".hero {\n  text-align: center;\n  padding: 80px 24px;\n  max-width: 800px;\n  margin: 0 auto;\n}\n\n.hero-title {\n  font-size: 48px;\n  font-weight: 700;\n  color: #1a1a2e;\n  margin: 0 0 24px 0;\n  line-height: 1.2;\n}\n\n.hero-subtitle {\n  font-size: 20px;\n  color: #4b5563;\n  margin: 0 0 32px 0;\n  line-height: 1.6;\n}\n\n.hero-actions {\n  display: flex;\n  gap: 16px;\n  justify-content: center;\n}"
+  },
+  {
+    "id": "comp-008",
+    "name": "Avatar",
+    "category": "elements",
+    "sourceScreen": "screen-5",
+    "extractedAt": "2026-01-19T15:06:00Z",
+    "tags": ["avatar", "user", "profile"],
+    "html": "<div class=\"avatar\">\n  <img src=\"https://api.dicebear.com/7.x/avataaars/svg?seed=user\" alt=\"User\" />\n</div>",
+    "css": ".avatar {\n  width: 40px;\n  height: 40px;\n  border-radius: 50%;\n  overflow: hidden;\n  border: 2px solid #e5e7eb;\n}\n\n.avatar img {\n  width: 100%;\n  height: 100%;\n  object-fit: cover;\n}"
+  },
+  {
+    "id": "comp-009",
+    "name": "Badge",
+    "category": "elements",
+    "sourceScreen": "screen-2",
+    "extractedAt": "2026-01-19T15:07:00Z",
+    "tags": ["badge", "tag", "label"],
+    "html": "<span class=\"badge badge-purple\">New</span>",
+    "css": ".badge {\n  display: inline-flex;\n  align-items: center;\n  padding: 4px 12px;\n  border-radius: 16px;\n  font-size: 12px;\n  font-weight: 600;\n}\n\n.badge-purple {\n  background: rgba(118, 75, 162, 0.1);\n  color: #764ba2;\n}\n\n.badge-green {\n  background: rgba(16, 185, 129, 0.1);\n  color: #10b981;\n}\n\n.badge-blue {\n  background: rgba(59, 130, 246, 0.1);\n  color: #3b82f6;\n}"
+  },
+  {
+    "id": "comp-010",
+    "name": "Stats Card",
+    "category": "cards",
+    "sourceScreen": "screen-5",
+    "extractedAt": "2026-01-19T15:08:00Z",
+    "tags": ["card", "stats", "metrics"],
+    "html": "<div class=\"stats-card\">\n  <div class=\"stats-icon\">\n    <svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\">\n      <path d=\"M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2\"/>\n      <circle cx=\"9\" cy=\"7\" r=\"4\"/>\n      <path d=\"M23 21v-2a4 4 0 0 0-3-3.87\"/>\n      <path d=\"M16 3.13a4 4 0 0 1 0 7.75\"/>\n    </svg>\n  </div>\n  <div class=\"stats-content\">\n    <span class=\"stats-value\">2,543</span>\n    <span class=\"stats-label\">Active Users</span>\n  </div>\n</div>",
+    "css": ".stats-card {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  background: white;\n  padding: 20px;\n  border-radius: 12px;\n  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);\n}\n\n.stats-icon {\n  width: 48px;\n  height: 48px;\n  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\n  border-radius: 12px;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: white;\n}\n\n.stats-content {\n  display: flex;\n  flex-direction: column;\n}\n\n.stats-value {\n  font-size: 24px;\n  font-weight: 700;\n  color: #1a1a2e;\n}\n\n.stats-label {\n  font-size: 14px;\n  color: #6b7280;\n}"
+  },
+  {
+    "id": "comp-011",
+    "name": "Table",
+    "category": "data",
+    "sourceScreen": "screen-4",
+    "extractedAt": "2026-01-19T15:09:00Z",
+    "tags": ["table", "data", "list"],
+    "html": "<table class=\"data-table\">\n  <thead>\n    <tr>\n      <th>Name</th>\n      <th>Status</th>\n      <th>Date</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Project Alpha</td>\n      <td><span class=\"badge badge-green\">Active</span></td>\n      <td>Jan 15, 2026</td>\n    </tr>\n    <tr>\n      <td>Project Beta</td>\n      <td><span class=\"badge badge-purple\">Draft</span></td>\n      <td>Jan 18, 2026</td>\n    </tr>\n  </tbody>\n</table>",
+    "css": ".data-table {\n  width: 100%;\n  border-collapse: collapse;\n}\n\n.data-table th,\n.data-table td {\n  padding: 12px 16px;\n  text-align: left;\n  border-bottom: 1px solid #e5e7eb;\n}\n\n.data-table th {\n  font-weight: 600;\n  color: #374151;\n  background: #f9fafb;\n}\n\n.data-table td {\n  color: #4b5563;\n}\n\n.data-table tbody tr:hover {\n  background: #f9fafb;\n}"
+  },
+  {
+    "id": "comp-012",
+    "name": "Search Input",
+    "category": "inputs",
+    "sourceScreen": "screen-3",
+    "extractedAt": "2026-01-19T15:10:00Z",
+    "tags": ["input", "search", "form"],
+    "html": "<div class=\"search-input\">\n  <svg class=\"search-icon\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\">\n    <circle cx=\"11\" cy=\"11\" r=\"8\"/>\n    <path d=\"m21 21-4.35-4.35\"/>\n  </svg>\n  <input type=\"text\" placeholder=\"Search...\" />\n</div>",
+    "css": ".search-input {\n  position: relative;\n  display: flex;\n  align-items: center;\n}\n\n.search-icon {\n  position: absolute;\n  left: 12px;\n  color: #9ca3af;\n  pointer-events: none;\n}\n\n.search-input input {\n  width: 100%;\n  padding: 10px 16px 10px 40px;\n  border: 1px solid #d1d5db;\n  border-radius: 8px;\n  font-size: 14px;\n  transition: border-color 0.2s, box-shadow 0.2s;\n}\n\n.search-input input:focus {\n  outline: none;\n  border-color: #764ba2;\n  box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.1);\n}"
+  }
+]
