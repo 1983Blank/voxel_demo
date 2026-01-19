@@ -16,6 +16,8 @@ import {
   Form,
   message,
   Spin,
+  Checkbox,
+  Alert,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
@@ -32,6 +34,8 @@ import {
   ExperimentOutlined,
   InboxOutlined,
   FileOutlined,
+  CheckSquareOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useScreensStore } from '@/store/screensStore';
@@ -50,10 +54,15 @@ export function Screens() {
     openPreview,
     closePreview,
     removeScreen,
+    removeScreens,
     duplicateScreen,
     uploadScreen,
     initializeScreens,
     isLoading,
+    selectedIds,
+    toggleSelectScreen,
+    selectAllScreens,
+    clearSelection,
   } = useScreensStore();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -61,12 +70,20 @@ export function Screens() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<UploadFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [form] = Form.useForm();
 
   // Initialize screens on mount
   useEffect(() => {
     initializeScreens();
   }, [initializeScreens]);
+
+  // Exit selection mode when no items selected
+  useEffect(() => {
+    if (selectedIds.length === 0 && isSelectionMode) {
+      // Keep selection mode active for user convenience
+    }
+  }, [selectedIds, isSelectionMode]);
 
   const filteredScreens = screens.filter(
     (screen) =>
@@ -158,7 +175,40 @@ export function Screens() {
     }
   };
 
+  const handleBatchDelete = () => {
+    if (selectedIds.length === 0) return;
+
+    Modal.confirm({
+      title: 'Delete Selected Screens',
+      content: `Are you sure you want to delete ${selectedIds.length} screen(s)? This action cannot be undone.`,
+      okText: 'Delete All',
+      okType: 'danger',
+      onOk: async () => {
+        await removeScreens(selectedIds);
+        setIsSelectionMode(false);
+        message.success(`Deleted ${selectedIds.length} screen(s)`);
+      },
+    });
+  };
+
+  const handleToggleSelectionMode = () => {
+    if (isSelectionMode) {
+      clearSelection();
+    }
+    setIsSelectionMode(!isSelectionMode);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.length === filteredScreens.length) {
+      clearSelection();
+    } else {
+      selectAllScreens();
+    }
+  };
+
   const ScreenCard = ({ screen }: { screen: CapturedScreen }) => {
+    const isSelected = selectedIds.includes(screen.id);
+
     // Use editedHtml for preview if available, otherwise use filePath
     const previewContent = screen.editedHtml ? (
       <iframe
@@ -198,10 +248,22 @@ export function Screens() {
       </div>
     );
 
+    const handleCardClick = () => {
+      if (isSelectionMode) {
+        toggleSelectScreen(screen.id);
+      } else {
+        openPreview(screen);
+      }
+    };
+
     return (
       <Card
         hoverable
-        style={{ height: '100%' }}
+        style={{
+          height: '100%',
+          border: isSelected ? '2px solid #764ba2' : undefined,
+          boxShadow: isSelected ? '0 0 0 2px rgba(118, 75, 162, 0.2)' : undefined,
+        }}
         cover={
           <div
             style={{
@@ -214,47 +276,92 @@ export function Screens() {
               position: 'relative',
               overflow: 'hidden',
             }}
-            onClick={() => openPreview(screen)}
+            onClick={handleCardClick}
           >
             {previewContent}
+
+            {/* Selection checkbox overlay */}
+            {isSelectionMode && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  left: 8,
+                  zIndex: 10,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSelectScreen(screen.id);
+                }}
+              >
+                <Checkbox
+                  checked={isSelected}
+                  style={{
+                    transform: 'scale(1.3)',
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Mock badge */}
+            {screen.isMock && (
+              <Tag
+                color="blue"
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  zIndex: 10,
+                }}
+              >
+                Demo
+              </Tag>
+            )}
+
             <div
               style={{
                 position: 'absolute',
                 inset: 0,
-                background: 'rgba(0,0,0,0.1)',
-                opacity: 0,
+                background: isSelected ? 'rgba(118, 75, 162, 0.2)' : 'rgba(0,0,0,0.1)',
+                opacity: isSelected ? 1 : 0,
                 transition: 'opacity 0.2s',
               }}
               className="card-overlay"
             />
-            <EyeOutlined
-              style={{
-                position: 'absolute',
-                fontSize: 32,
-                color: 'white',
-                opacity: 0,
-                transition: 'opacity 0.2s',
-                zIndex: 1,
-              }}
-              className="card-eye"
-            />
+            {!isSelectionMode && (
+              <EyeOutlined
+                style={{
+                  position: 'absolute',
+                  fontSize: 32,
+                  color: 'white',
+                  opacity: 0,
+                  transition: 'opacity 0.2s',
+                  zIndex: 1,
+                }}
+                className="card-eye"
+              />
+            )}
           </div>
         }
-        actions={[
-          <Tooltip title="Preview" key="preview">
-            <EyeOutlined onClick={() => openPreview(screen)} />
-          </Tooltip>,
-          <Tooltip title="Edit" key="edit">
-            <EditOutlined onClick={() => navigate(`/editor/${screen.id}`)} />
-          </Tooltip>,
-          <Dropdown
-            key="more"
-            menu={{ items: getDropdownItems(screen) }}
-            trigger={['click']}
-          >
-            <MoreOutlined />
-          </Dropdown>,
-        ]}
+        actions={
+          isSelectionMode
+            ? undefined
+            : [
+                <Tooltip title="Preview" key="preview">
+                  <EyeOutlined onClick={() => openPreview(screen)} />
+                </Tooltip>,
+                <Tooltip title="Edit" key="edit">
+                  <EditOutlined onClick={() => navigate(`/editor/${screen.id}`)} />
+                </Tooltip>,
+                <Dropdown
+                  key="more"
+                  menu={{ items: getDropdownItems(screen) }}
+                  trigger={['click']}
+                >
+                  <MoreOutlined />
+                </Dropdown>,
+              ]
+        }
       >
         <Card.Meta
           title={
@@ -293,6 +400,44 @@ export function Screens() {
 
   return (
     <div>
+      {/* Selection mode banner */}
+      {isSelectionMode && (
+        <Alert
+          message={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Space>
+                <Checkbox
+                  checked={selectedIds.length === filteredScreens.length && filteredScreens.length > 0}
+                  indeterminate={selectedIds.length > 0 && selectedIds.length < filteredScreens.length}
+                  onChange={handleSelectAll}
+                />
+                <Text>
+                  {selectedIds.length} of {filteredScreens.length} selected
+                </Text>
+              </Space>
+              <Space>
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={selectedIds.length === 0}
+                  onClick={handleBatchDelete}
+                >
+                  Delete Selected
+                </Button>
+                <Button
+                  icon={<CloseOutlined />}
+                  onClick={handleToggleSelectionMode}
+                >
+                  Cancel
+                </Button>
+              </Space>
+            </div>
+          }
+          type="info"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <div
         style={{
           display: 'flex',
@@ -329,6 +474,13 @@ export function Screens() {
               />
             </Tooltip>
           </Button.Group>
+          <Tooltip title={isSelectionMode ? 'Exit selection mode' : 'Select multiple'}>
+            <Button
+              icon={<CheckSquareOutlined />}
+              type={isSelectionMode ? 'primary' : 'default'}
+              onClick={handleToggleSelectionMode}
+            />
+          </Tooltip>
           <Button
             type="primary"
             icon={<UploadOutlined />}

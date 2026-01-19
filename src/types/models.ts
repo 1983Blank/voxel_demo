@@ -57,6 +57,7 @@ export interface CapturedScreen {
   versions?: ScreenVersion[]; // Version history
   currentVersionId?: string;
   updatedAt?: string;
+  isMock?: boolean; // Flag for demo/mock screens
 }
 
 export interface ExtractedComponent {

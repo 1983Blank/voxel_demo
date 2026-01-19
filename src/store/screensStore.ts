@@ -6,44 +6,49 @@ import { supabase, isSupabaseConfigured } from '@/services/supabase';
 // Static list of captured screens from mock-captures folder (for demo/offline)
 const MOCK_SCREENS: CapturedScreen[] = [
   {
-    id: 'screen-1',
+    id: 'mock-screen-1',
     name: 'GetVoxel.ai Demo App - Screen 1',
     fileName: 'GetVoxel.ai Demo App (1_19_2026 2：44：48 PM).html',
     filePath: '/src/mock-captures/screens/GetVoxel.ai Demo App (1_19_2026 2：44：48 PM).html',
     capturedAt: '2026-01-19T14:44:48Z',
     tags: ['demo', 'landing'],
+    isMock: true,
   },
   {
-    id: 'screen-2',
+    id: 'mock-screen-2',
     name: 'GetVoxel.ai Demo App - Screen 2',
     fileName: 'GetVoxel.ai Demo App (1_19_2026 2：44：58 PM).html',
     filePath: '/src/mock-captures/screens/GetVoxel.ai Demo App (1_19_2026 2：44：58 PM).html',
     capturedAt: '2026-01-19T14:44:58Z',
     tags: ['demo', 'features'],
+    isMock: true,
   },
   {
-    id: 'screen-3',
+    id: 'mock-screen-3',
     name: 'GetVoxel.ai Demo App - Screen 3',
     fileName: 'GetVoxel.ai Demo App (1_19_2026 2：45：04 PM).html',
     filePath: '/src/mock-captures/screens/GetVoxel.ai Demo App (1_19_2026 2：45：04 PM).html',
     capturedAt: '2026-01-19T14:45:04Z',
     tags: ['demo', 'pricing'],
+    isMock: true,
   },
   {
-    id: 'screen-4',
+    id: 'mock-screen-4',
     name: 'GetVoxel.ai Demo App - Screen 4',
     fileName: 'GetVoxel.ai Demo App (1_19_2026 2：45：09 PM).html',
     filePath: '/src/mock-captures/screens/GetVoxel.ai Demo App (1_19_2026 2：45：09 PM).html',
     capturedAt: '2026-01-19T14:45:09Z',
     tags: ['demo', 'about'],
+    isMock: true,
   },
   {
-    id: 'screen-5',
+    id: 'mock-screen-5',
     name: 'GetVoxel.ai Demo App - Screen 5',
     fileName: 'GetVoxel.ai Demo App (1_19_2026 2：45：17 PM).html',
     filePath: '/src/mock-captures/screens/GetVoxel.ai Demo App (1_19_2026 2：45：17 PM).html',
     capturedAt: '2026-01-19T14:45:17Z',
     tags: ['demo', 'contact'],
+    isMock: true,
   },
 ];
 
@@ -55,6 +60,8 @@ interface ScreensState {
   isInitialized: boolean;
   isLoading: boolean;
   isSyncing: boolean;
+  hasUserData: boolean; // Track if user has added/modified data
+  selectedIds: string[]; // For batch operations
 
   // Actions
   initializeScreens: () => Promise<void>;
@@ -63,11 +70,19 @@ interface ScreensState {
   addScreen: (screen: CapturedScreen) => void;
   uploadScreen: (file: File, name?: string, tags?: string[]) => Promise<CapturedScreen | null>;
   removeScreen: (id: string) => Promise<void>;
+  removeScreens: (ids: string[]) => Promise<void>; // Batch delete
   duplicateScreen: (id: string) => Promise<void>;
   selectScreen: (screen: CapturedScreen | null) => void;
   openPreview: (screen: CapturedScreen) => void;
   closePreview: () => void;
   updateScreen: (id: string, updates: Partial<CapturedScreen>) => Promise<void>;
+  clearMockScreens: () => void;
+
+  // Selection for batch operations
+  toggleSelectScreen: (id: string) => void;
+  selectAllScreens: () => void;
+  clearSelection: () => void;
+  isSelected: (id: string) => boolean;
 
   // Version management
   saveScreenVersion: (
@@ -95,6 +110,8 @@ export const useScreensStore = create<ScreensState>()(
       isInitialized: false,
       isLoading: false,
       isSyncing: false,
+      hasUserData: false,
+      selectedIds: [],
 
       initializeScreens: async () => {
         const state = get();
@@ -113,31 +130,27 @@ export const useScreensStore = create<ScreensState>()(
           }
         }
 
-        // Fallback to mock screens + local storage
+        // Use persisted screens from localStorage
         const existingScreens = state.screens;
-        const mergedScreens = MOCK_SCREENS.map((mockScreen) => {
-          const existing = existingScreens.find((s) => s.id === mockScreen.id);
-          if (existing) {
-            return {
-              ...mockScreen,
-              editedHtml: existing.editedHtml,
-              versions: existing.versions,
-              currentVersionId: existing.currentVersionId,
-              updatedAt: existing.updatedAt,
-            };
-          }
-          return mockScreen;
-        });
 
-        const customScreens = existingScreens.filter(
-          (s) => !MOCK_SCREENS.find((m) => m.id === s.id)
-        );
-
-        set({
-          screens: [...mergedScreens, ...customScreens],
-          isInitialized: true,
-          isLoading: false,
-        });
+        // Only show mock screens if user hasn't added any data yet
+        if (!state.hasUserData && existingScreens.length === 0) {
+          set({
+            screens: MOCK_SCREENS,
+            isInitialized: true,
+            isLoading: false,
+          });
+        } else {
+          // User has data, just use what's persisted (filter out any old mock screens if hasUserData)
+          const userScreens = state.hasUserData
+            ? existingScreens.filter(s => !s.isMock)
+            : existingScreens;
+          set({
+            screens: userScreens,
+            isInitialized: true,
+            isLoading: false,
+          });
+        }
       },
 
       fetchFromSupabase: async () => {
@@ -145,8 +158,11 @@ export const useScreensStore = create<ScreensState>()(
 
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          // Not logged in, use mock screens
-          set({ screens: MOCK_SCREENS });
+          // Not logged in, use local data or mock screens
+          const state = get();
+          if (!state.hasUserData && state.screens.length === 0) {
+            set({ screens: MOCK_SCREENS });
+          }
           return;
         }
 
@@ -173,18 +189,19 @@ export const useScreensStore = create<ScreensState>()(
           updatedAt: row.updated_at,
         }));
 
-        // If no screens in DB, show mock screens
-        if (screens.length === 0) {
-          set({ screens: MOCK_SCREENS });
-        } else {
-          set({ screens });
-        }
+        set({
+          screens,
+          hasUserData: screens.length > 0
+        });
       },
 
       setScreens: (screens) => set({ screens }),
 
       addScreen: (screen) =>
-        set((state) => ({ screens: [screen, ...state.screens] })),
+        set((state) => ({
+          screens: [screen, ...state.screens],
+          hasUserData: true,
+        })),
 
       uploadScreen: async (file: File, name?: string, tags?: string[]) => {
         const screenName = name || file.name.replace(/\.html?$/i, '');
@@ -228,11 +245,9 @@ export const useScreensStore = create<ScreensState>()(
               if (error) {
                 console.error('Error saving to Supabase:', error);
               } else if (data) {
-                // Update newScreen with Supabase ID
                 newScreen.id = data.id;
                 newScreen.capturedAt = data.created_at;
 
-                // Also create initial version in Supabase
                 await supabase.from('screen_versions').insert({
                   screen_id: data.id,
                   html: html,
@@ -245,8 +260,14 @@ export const useScreensStore = create<ScreensState>()(
           }
         }
 
-        // Add to local state
-        set((state) => ({ screens: [newScreen, ...state.screens] }));
+        // Remove mock screens when user uploads first screen, add to local state
+        set((state) => {
+          const nonMockScreens = state.screens.filter(s => !s.isMock);
+          return {
+            screens: [newScreen, ...nonMockScreens],
+            hasUserData: true,
+          };
+        });
 
         return newScreen;
       },
@@ -255,7 +276,10 @@ export const useScreensStore = create<ScreensState>()(
         // Remove from Supabase if configured
         if (isSupabaseConfigured()) {
           try {
-            await supabase.from('screens').delete().eq('id', id);
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              await supabase.from('screens').delete().eq('id', id);
+            }
           } catch (error) {
             console.error('Error deleting from Supabase:', error);
           }
@@ -264,6 +288,31 @@ export const useScreensStore = create<ScreensState>()(
         set((state) => ({
           screens: state.screens.filter((s) => s.id !== id),
           selectedScreen: state.selectedScreen?.id === id ? null : state.selectedScreen,
+          selectedIds: state.selectedIds.filter(sid => sid !== id),
+          hasUserData: true,
+        }));
+      },
+
+      removeScreens: async (ids) => {
+        // Remove from Supabase if configured
+        if (isSupabaseConfigured()) {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              await supabase.from('screens').delete().in('id', ids);
+            }
+          } catch (error) {
+            console.error('Error batch deleting from Supabase:', error);
+          }
+        }
+
+        set((state) => ({
+          screens: state.screens.filter((s) => !ids.includes(s.id)),
+          selectedScreen: state.selectedScreen && ids.includes(state.selectedScreen.id)
+            ? null
+            : state.selectedScreen,
+          selectedIds: [],
+          hasUserData: true,
         }));
       },
 
@@ -279,6 +328,7 @@ export const useScreensStore = create<ScreensState>()(
           capturedAt: new Date().toISOString(),
           versions: [],
           currentVersionId: undefined,
+          isMock: undefined, // Remove mock flag for duplicates
         };
 
         // Save to Supabase if configured
@@ -308,7 +358,10 @@ export const useScreensStore = create<ScreensState>()(
           }
         }
 
-        set({ screens: [...state.screens, newScreen] });
+        set((state) => ({
+          screens: [...state.screens, newScreen],
+          hasUserData: true,
+        }));
       },
 
       selectScreen: (screen) => set({ selectedScreen: screen }),
@@ -321,13 +374,16 @@ export const useScreensStore = create<ScreensState>()(
         // Update in Supabase if configured
         if (isSupabaseConfigured()) {
           try {
-            const supabaseUpdates: Record<string, unknown> = {};
-            if (updates.name) supabaseUpdates.name = updates.name;
-            if (updates.editedHtml) supabaseUpdates.html = updates.editedHtml;
-            if (updates.tags) supabaseUpdates.tags = updates.tags;
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              const supabaseUpdates: Record<string, unknown> = {};
+              if (updates.name) supabaseUpdates.name = updates.name;
+              if (updates.editedHtml) supabaseUpdates.html = updates.editedHtml;
+              if (updates.tags) supabaseUpdates.tags = updates.tags;
 
-            if (Object.keys(supabaseUpdates).length > 0) {
-              await supabase.from('screens').update(supabaseUpdates).eq('id', id);
+              if (Object.keys(supabaseUpdates).length > 0) {
+                await supabase.from('screens').update(supabaseUpdates).eq('id', id);
+              }
             }
           } catch (error) {
             console.error('Error updating in Supabase:', error);
@@ -338,7 +394,38 @@ export const useScreensStore = create<ScreensState>()(
           screens: state.screens.map((s) =>
             s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s
           ),
+          hasUserData: true,
         }));
+      },
+
+      clearMockScreens: () => {
+        set((state) => ({
+          screens: state.screens.filter(s => !s.isMock),
+          hasUserData: true,
+        }));
+      },
+
+      // Selection methods for batch operations
+      toggleSelectScreen: (id) => {
+        set((state) => ({
+          selectedIds: state.selectedIds.includes(id)
+            ? state.selectedIds.filter(sid => sid !== id)
+            : [...state.selectedIds, id],
+        }));
+      },
+
+      selectAllScreens: () => {
+        set((state) => ({
+          selectedIds: state.screens.map(s => s.id),
+        }));
+      },
+
+      clearSelection: () => {
+        set({ selectedIds: [] });
+      },
+
+      isSelected: (id) => {
+        return get().selectedIds.includes(id);
       },
 
       saveScreenVersion: async (screenId, html, options = {}) => {
@@ -354,26 +441,28 @@ export const useScreensStore = create<ScreensState>()(
         // Save to Supabase if configured
         if (isSupabaseConfigured()) {
           try {
-            const { data, error } = await supabase
-              .from('screen_versions')
-              .insert({
-                screen_id: screenId,
-                html,
-                prompt: options.prompt || null,
-                description: options.description || null,
-              })
-              .select()
-              .single();
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              const { data, error } = await supabase
+                .from('screen_versions')
+                .insert({
+                  screen_id: screenId,
+                  html,
+                  prompt: options.prompt || null,
+                  description: options.description || null,
+                })
+                .select()
+                .single();
 
-            if (!error && data) {
-              version.id = data.id;
+              if (!error && data) {
+                version.id = data.id;
+              }
+
+              await supabase
+                .from('screens')
+                .update({ html })
+                .eq('id', screenId);
             }
-
-            // Also update the screen's html
-            await supabase
-              .from('screens')
-              .update({ html })
-              .eq('id', screenId);
           } catch (error) {
             console.error('Error saving version to Supabase:', error);
           }
@@ -389,10 +478,12 @@ export const useScreensStore = create<ScreensState>()(
                 versions: [...versions, version],
                 currentVersionId: version.id,
                 updatedAt: now,
+                isMock: undefined, // Remove mock flag when edited
               };
             }
             return s;
           }),
+          hasUserData: true,
         }));
 
         return version;
@@ -421,6 +512,7 @@ export const useScreensStore = create<ScreensState>()(
                 }
               : s
           ),
+          hasUserData: true,
         }));
       },
 
@@ -455,13 +547,8 @@ export const useScreensStore = create<ScreensState>()(
     {
       name: 'voxel-screens-storage',
       partialize: (state) => ({
-        screens: state.screens.map((s) => ({
-          ...s,
-          ...(s.editedHtml ? { editedHtml: s.editedHtml } : {}),
-          ...(s.versions ? { versions: s.versions } : {}),
-          ...(s.currentVersionId ? { currentVersionId: s.currentVersionId } : {}),
-          ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}),
-        })),
+        screens: state.screens,
+        hasUserData: state.hasUserData,
         isInitialized: state.isInitialized,
       }),
     }
