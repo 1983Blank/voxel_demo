@@ -6,12 +6,13 @@
  *
  * Libraries used:
  * - sanitize-html: HTML sanitization with configurable tag/attribute stripping
- * - html-minifier-terser: Production-grade HTML minification
  * - DOMParser: Native browser API for DOM manipulation
+ *
+ * Note: html-minifier-terser was removed as it depends on clean-css which
+ * requires Node.js process global and doesn't work in browsers.
  */
 
 import sanitizeHtml from 'sanitize-html';
-import { minify as htmlMinifierMinify } from 'html-minifier-terser';
 
 // ============================================
 // COMPACTION METHOD TYPES
@@ -25,11 +26,9 @@ export type CompactionMethod =
   | 'regex-strip-styles'      // Regex: Remove inline styles
   | 'regex-extract-body'      // Regex: Extract only body content
   | 'regex-aggressive'        // Regex: All custom methods combined
-  // Library-based methods
+  // Library-based methods (browser-compatible only)
   | 'lib-sanitize'            // sanitize-html: Strip dangerous/unnecessary tags
   | 'lib-sanitize-strict'     // sanitize-html: Very strict, text-focused
-  | 'lib-minifier'            // html-minifier-terser: Production minification
-  | 'lib-minifier-aggressive' // html-minifier-terser: Maximum compression
   | 'dom-extract-text'        // DOMParser: Extract text content only
   | 'dom-extract-structure'   // DOMParser: Keep structure, strip attributes
   // Combined methods
@@ -103,14 +102,6 @@ export async function compactHtml(html: string, options: CompactionOptions): Pro
         compacted = libSanitizeStrict(html);
         break;
 
-      case 'lib-minifier':
-        compacted = await libMinifier(html);
-        break;
-
-      case 'lib-minifier-aggressive':
-        compacted = await libMinifierAggressive(html);
-        break;
-
       case 'dom-extract-text':
         compacted = domExtractText(html);
         break;
@@ -121,18 +112,19 @@ export async function compactHtml(html: string, options: CompactionOptions): Pro
 
       // ---- Combined Methods ----
       case 'combined-optimal':
-        // Best for LLM: sanitize + strip base64 + minify
+        // Best for LLM: sanitize + strip base64 + minify (using regex)
         compacted = regexStripBase64(html);
         compacted = libSanitize(compacted);
-        compacted = await libMinifier(compacted);
+        compacted = regexMinify(compacted);
         break;
 
       case 'combined-maximum':
-        // Maximum reduction: everything
+        // Maximum reduction: everything (using regex methods)
         compacted = regexExtractBody(html);
         compacted = regexStripBase64(compacted);
+        compacted = regexStripStyles(compacted);
         compacted = libSanitizeStrict(compacted);
-        compacted = await libMinifierAggressive(compacted);
+        compacted = regexMinify(compacted);
         break;
 
       default:
@@ -311,53 +303,6 @@ function libSanitizeStrict(html: string): string {
 }
 
 // ============================================
-// HTML-MINIFIER-TERSER METHODS
-// ============================================
-
-async function libMinifier(html: string): Promise<string> {
-  try {
-    return await htmlMinifierMinify(html, {
-      collapseWhitespace: true,
-      removeComments: true,
-      removeRedundantAttributes: true,
-      removeEmptyAttributes: true,
-      minifyCSS: false,  // clean-css doesn't work in browser (requires Node.js process)
-      minifyJS: false,   // terser may have browser compatibility issues
-    });
-  } catch (error) {
-    console.warn('[Compactor] html-minifier-terser failed:', error);
-    return html;
-  }
-}
-
-async function libMinifierAggressive(html: string): Promise<string> {
-  try {
-    return await htmlMinifierMinify(html, {
-      collapseWhitespace: true,
-      conservativeCollapse: false,
-      collapseInlineTagWhitespace: true,
-      removeComments: true,
-      removeRedundantAttributes: true,
-      removeEmptyAttributes: true,
-      removeEmptyElements: false,  // Keep structure
-      removeOptionalTags: true,
-      removeScriptTypeAttributes: true,
-      removeStyleLinkTypeAttributes: true,
-      minifyCSS: false,  // clean-css doesn't work in browser (requires Node.js process)
-      minifyJS: false,   // terser may have browser compatibility issues
-      minifyURLs: true,
-      sortAttributes: true,
-      sortClassName: true,
-      useShortDoctype: true,
-      trimCustomFragments: true,
-    });
-  } catch (error) {
-    console.warn('[Compactor] html-minifier-terser aggressive failed:', error);
-    return html;
-  }
-}
-
-// ============================================
 // DOM-BASED METHODS (Native Browser API)
 // ============================================
 
@@ -479,7 +424,7 @@ function formatBytes(bytes: number): string {
 export function getRecommendedMethod(htmlSize: number): CompactionMethod {
   if (htmlSize < 30000) return 'none';
   if (htmlSize < 50000) return 'regex-minify';
-  if (htmlSize < 100000) return 'lib-minifier';
+  if (htmlSize < 100000) return 'lib-sanitize';
   if (htmlSize < 200000) return 'regex-strip-base64';
   if (htmlSize < 500000) return 'combined-optimal';
   return 'combined-maximum';
@@ -508,11 +453,9 @@ export function getAvailableMethods(): MethodInfo[] {
     { value: 'regex-extract-body', label: 'Regex: Body Only', description: 'Extract body, remove scripts/head', category: 'regex', expectedReduction: '30-50%' },
     { value: 'regex-aggressive', label: 'Regex: Aggressive', description: 'All regex methods combined', category: 'regex', expectedReduction: '60-80%' },
 
-    // Library methods
+    // Library methods (browser-compatible only)
     { value: 'lib-sanitize', label: 'Lib: Sanitize', description: 'sanitize-html with safe defaults', category: 'library', expectedReduction: '20-40%' },
     { value: 'lib-sanitize-strict', label: 'Lib: Sanitize Strict', description: 'sanitize-html with minimal tags', category: 'library', expectedReduction: '40-60%' },
-    { value: 'lib-minifier', label: 'Lib: Minifier', description: 'html-minifier-terser standard', category: 'library', expectedReduction: '15-30%' },
-    { value: 'lib-minifier-aggressive', label: 'Lib: Minifier Aggressive', description: 'html-minifier-terser max compression', category: 'library', expectedReduction: '20-40%' },
 
     // DOM methods
     { value: 'dom-extract-text', label: 'DOM: Text Only', description: 'Extract text content with structure markers', category: 'dom', expectedReduction: '70-90%' },
