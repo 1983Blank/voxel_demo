@@ -14,3 +14,4 @@ export { VariantPreviewModal } from './VariantPreviewModal';
 export { ChatMessage, type ChatMessageData } from './ChatMessage';
 export { ChatPanel } from './ChatPanel';
 export { ScreenPreview, type SelectedTab } from './ScreenPreview';
+export { ModelSelector } from './ModelSelector';

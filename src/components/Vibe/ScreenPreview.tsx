@@ -81,15 +81,6 @@ export const ScreenPreview: React.FC<ScreenPreviewProps> = ({
 
   const previewContent = getPreviewContent();
 
-  // Create blob URL for source HTML
-  const sourceUrl = useMemo(() => {
-    if (sourceHtml) {
-      const blob = new Blob([sourceHtml], { type: 'text/html' });
-      return URL.createObjectURL(blob);
-    }
-    return null;
-  }, [sourceHtml]);
-
   const handleRefresh = () => {
     setIframeKey((k) => k + 1);
   };
@@ -214,9 +205,10 @@ export const ScreenPreview: React.FC<ScreenPreviewProps> = ({
           ) : previewContent.url || previewContent.html ? (
             <iframe
               key={iframeKey}
-              src={previewContent.url || sourceUrl || undefined}
-              srcDoc={!previewContent.url && previewContent.html ? previewContent.html : undefined}
+              src={previewContent.url || undefined}
+              srcDoc={!previewContent.url ? (previewContent.html || sourceHtml || undefined) : undefined}
               title="Screen preview"
+              sandbox="allow-scripts allow-same-origin"
               style={{
                 width: '100%',
                 height: '100%',

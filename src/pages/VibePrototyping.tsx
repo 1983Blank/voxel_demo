@@ -60,6 +60,7 @@ import {
   VariantPreviewModal,
   ChatPanel,
   ScreenPreview,
+  ModelSelector,
   type SelectedTab,
 } from '@/components/Vibe';
 
@@ -523,6 +524,7 @@ export const VibePrototyping: React.FC = () => {
         </Space>
 
         <Space>
+          <ModelSelector size="small" />
           {selectedVariantIndex && (
             <Tag color="gold" icon={<CheckCircleOutlined />}>
               Winner: Variant {selectedVariantIndex}
@@ -543,6 +545,42 @@ export const VibePrototyping: React.FC = () => {
           onClose={() => setError(null)}
           style={{ margin: '8px 24px' }}
         />
+      )}
+
+      {/* Variant Plans Section - Prominent when plans are ready */}
+      {status === 'plan_ready' && plan && (
+        <div
+          style={{
+            padding: '12px 24px',
+            borderBottom: '1px solid #f0f0f0',
+            backgroundColor: '#fffbe6',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <Space>
+              <AppstoreOutlined style={{ color: '#faad14' }} />
+              <Text strong>Review Variant Plans</Text>
+              <Badge count={plan.plans.length} style={{ backgroundColor: '#1890ff' }} />
+              <Tag color="warning">Awaiting Approval</Tag>
+            </Space>
+            <Button
+              type="primary"
+              onClick={handleApprovePlan}
+              icon={<ThunderboltOutlined />}
+            >
+              Approve & Generate All
+            </Button>
+          </div>
+          <PlanReviewGrid
+            plans={plan.plans}
+            onUpdatePlan={handleUpdatePlan}
+            onApprove={handleApprovePlan}
+            onRegenerate={handleRegeneratePlan}
+            isApproved={false}
+            modelInfo={{ model: plan.model, provider: plan.provider }}
+            compact
+          />
+        </div>
       )}
 
       {/* Main Content - Split Panel */}
@@ -600,48 +638,32 @@ export const VibePrototyping: React.FC = () => {
           ghost
           style={{ borderRadius: 0 }}
         >
-          {/* Variant Plans */}
-          {(status === 'plan_ready' || plan) && (
+          {/* Variant Plans - Only show in collapsed section after approval */}
+          {plan && status !== 'plan_ready' && (
             <Panel
               key="plans"
               header={
                 <Space>
                   <AppstoreOutlined />
                   <span>Variant Plans</span>
-                  <Badge count={plan?.plans.length || 0} style={{ backgroundColor: '#1890ff' }} />
-                  {status === 'plan_ready' && (
-                    <Tag color="warning">Awaiting Approval</Tag>
+                  <Badge count={plan.plans.length} style={{ backgroundColor: '#1890ff' }} />
+                  {currentSession?.plan_approved && (
+                    <Tag color="success" icon={<CheckCircleOutlined />}>Approved</Tag>
                   )}
                 </Space>
               }
-              extra={
-                status === 'plan_ready' && (
-                  <Button
-                    type="primary"
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleApprovePlan();
-                    }}
-                  >
-                    Approve & Generate
-                  </Button>
-                )
-              }
             >
-              {plan && (
-                <div style={{ padding: '8px 0' }}>
-                  <PlanReviewGrid
-                    plans={plan.plans}
-                    onUpdatePlan={handleUpdatePlan}
-                    onApprove={handleApprovePlan}
-                    onRegenerate={handleRegeneratePlan}
-                    isApproved={currentSession?.plan_approved}
-                    modelInfo={{ model: plan.model, provider: plan.provider }}
-                    compact
-                  />
-                </div>
-              )}
+              <div style={{ padding: '8px 0' }}>
+                <PlanReviewGrid
+                  plans={plan.plans}
+                  onUpdatePlan={handleUpdatePlan}
+                  onApprove={handleApprovePlan}
+                  onRegenerate={handleRegeneratePlan}
+                  isApproved={currentSession?.plan_approved}
+                  modelInfo={{ model: plan.model, provider: plan.provider }}
+                  compact
+                />
+              </div>
             </Panel>
           )}
 
