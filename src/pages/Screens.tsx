@@ -32,6 +32,7 @@ import {
   AppstoreOutlined,
   UnorderedListOutlined,
   ExperimentOutlined,
+  ThunderboltOutlined,
   InboxOutlined,
   FileOutlined,
   CheckSquareOutlined,
@@ -121,6 +122,12 @@ export function Screens() {
       icon: <ExperimentOutlined />,
       label: 'Create Variants',
       onClick: () => navigate(`/variants/${screen.id}`),
+    },
+    {
+      key: 'vibe',
+      icon: <ThunderboltOutlined />,
+      label: 'Vibe Prototype',
+      onClick: () => navigate(`/vibe/${screen.id}`),
     },
     {
       key: 'duplicate',
@@ -601,6 +608,15 @@ export function Screens() {
                 }}
               >
                 Duplicate
+              </Button>
+              <Button
+                icon={<ThunderboltOutlined />}
+                onClick={() => {
+                  navigate(`/vibe/${previewScreen.id}`);
+                  closePreview();
+                }}
+              >
+                Vibe Prototype
               </Button>
               <Button
                 type="primary"

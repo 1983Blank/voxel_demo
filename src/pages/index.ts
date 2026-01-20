@@ -10,6 +10,7 @@ export { Screens } from './Screens';
 export { Components } from './Components';
 export { Editor } from './Editor';
 export { Variants } from './Variants';
+export { VibePrototyping } from './VibePrototyping';
 export { Context } from './Context';
 export { Collaborate } from './Collaborate';
 export { SharedView } from './SharedView';

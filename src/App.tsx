@@ -14,6 +14,7 @@ import {
   Components,
   Editor,
   Variants,
+  VibePrototyping,
   Context,
   Analytics,
   Collaborate,
@@ -110,6 +111,8 @@ function App() {
                 <Route path="/components" element={<Components />} />
                 <Route path="/editor/:screenId" element={<Editor />} />
                 <Route path="/variants/:screenId" element={<Variants />} />
+                <Route path="/vibe/:screenId" element={<VibePrototyping />} />
+                <Route path="/vibe/:screenId/:sessionId" element={<VibePrototyping />} />
                 <Route path="/context" element={<Context />} />
                 <Route path="/collaborate" element={<Collaborate />} />
                 <Route path="/analytics" element={<Analytics />} />
