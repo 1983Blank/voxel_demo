@@ -150,6 +150,14 @@ export const VibePrototyping: React.FC = () => {
               const existingVariants = await getVariants(sessionId);
               if (existingVariants.length > 0) {
                 setVariants(existingVariants);
+
+                // Auto-select the first completed variant tab, or the selected one
+                const completedVariant = existingVariants.find((v) => v.status === 'complete');
+                if (session.selected_variant_index) {
+                  setPreviewTab(session.selected_variant_index as 1 | 2 | 3 | 4);
+                } else if (completedVariant) {
+                  setPreviewTab(completedVariant.variant_index as 1 | 2 | 3 | 4);
+                }
               }
             }
           } else {
@@ -548,7 +556,11 @@ export const VibePrototyping: React.FC = () => {
               selectedTab={previewTab}
               onTabChange={handleTabChange}
               selectedVariantIndex={selectedVariantIndex}
-              onExpandPreview={() => previewTab !== 'source' && setPreviewVariant(previewTab as number)}
+              onExpandPreview={
+                previewTab !== 'source' && getVariantByIndex(previewTab as number)
+                  ? () => setPreviewVariant(previewTab as number)
+                  : undefined
+              }
               isGenerating={isGenerating}
               currentGeneratingIndex={progress?.variantIndex}
             />

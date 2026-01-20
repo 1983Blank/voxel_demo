@@ -262,17 +262,16 @@ export const ScreenPreview: React.FC<ScreenPreviewProps> = ({
           const isSource = tab === 'source';
           const isSelected = !isSource && selectedVariantIndex === tab;
 
+          // Tab is clickable if: source, complete, or currently generating (either this tab or any)
+          const isClickable = isSource || status === 'complete' || status === 'generating' || isGenerating;
+
           return (
             <Button
               key={tab}
               type={isActive ? 'primary' : 'default'}
               size="small"
               onClick={() => onTabChange(tab)}
-              disabled={
-                !isSource &&
-                status === 'pending' &&
-                !isGenerating
-              }
+              disabled={!isClickable}
               style={{
                 minWidth: isSource ? 70 : 44,
                 borderColor: !isSource && !isActive ? getVibeVariantColor(tab as number) : undefined,

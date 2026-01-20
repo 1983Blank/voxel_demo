@@ -229,9 +229,13 @@ export const useVibeStore = create<VibeState>((set, get) => ({
   setVariants: (variants) => {
     set({ variants });
 
-    // Check if all complete
-    const allComplete = variants.length === 4 && variants.every((v) => v.status === 'complete');
-    if (allComplete) {
+    // Check if all complete or if we have any completed variants (for existing sessions)
+    const completedCount = variants.filter((v) => v.status === 'complete').length;
+    const allComplete = variants.length === 4 && completedCount === 4;
+
+    // If all 4 are complete, or if we're loading an existing session with some completed variants,
+    // set status to 'complete' (this allows tabs to be clickable)
+    if (allComplete || (completedCount > 0 && get().status !== 'generating')) {
       set({ status: 'complete' });
     }
   },
