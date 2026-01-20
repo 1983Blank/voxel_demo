@@ -135,13 +135,24 @@ export const useAuthStore = create<AuthState>()(
           return {};
         }
 
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
         if (error) {
           return { error: error.message };
+        }
+
+        // Set auth state immediately on successful login (don't wait for listener)
+        if (data.session?.user) {
+          const user = await mapSupabaseUser(data.session.user);
+          set({
+            supabaseUser: data.session.user,
+            user,
+            isAuthenticated: true,
+            accessToken: data.session.access_token,
+          });
         }
 
         return {};
