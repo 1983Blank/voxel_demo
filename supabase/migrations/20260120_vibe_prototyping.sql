@@ -6,7 +6,7 @@
 -- Stores prototyping sessions with prompt and status
 -- ============================================
 create table if not exists vibe_sessions (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) on delete cascade not null,
   screen_id uuid references screens(id) on delete cascade not null,
   name text not null,
@@ -50,7 +50,7 @@ create trigger vibe_sessions_updated_at
 -- Stores 4 variant concepts before code generation
 -- ============================================
 create table if not exists vibe_variant_plans (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   session_id uuid references vibe_sessions(id) on delete cascade not null,
   variant_index integer not null check (variant_index >= 1 and variant_index <= 4),
   title text not null,
@@ -111,7 +111,7 @@ create policy "Users can delete plans of own sessions"
 -- Stores generated variant files with CDN URLs
 -- ============================================
 create table if not exists vibe_variants (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   session_id uuid references vibe_sessions(id) on delete cascade not null,
   plan_id uuid references vibe_variant_plans(id) on delete cascade not null,
   variant_index integer not null check (variant_index >= 1 and variant_index <= 4),
@@ -190,7 +190,7 @@ create trigger vibe_variants_updated_at
 -- Stores extracted UI analysis from screens
 -- ============================================
 create table if not exists screen_ui_metadata (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   screen_id uuid references screens(id) on delete cascade not null unique,
   -- Extracted colors (primary, secondary, background, text, accents)
   colors jsonb not null default '{}',
