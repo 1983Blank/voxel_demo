@@ -188,7 +188,8 @@ async function uploadVariantFiles(
     })
 
   if (uploadError) {
-    throw new Error(`Failed to upload HTML: ${uploadError.message}`)
+    console.error('[generate-variant-code] Storage upload error:', uploadError)
+    throw new Error(`Failed to upload HTML to storage: ${uploadError.message}. Ensure the 'vibe-files' bucket exists and has proper permissions.`)
   }
 
   // Get public URL
@@ -211,6 +212,9 @@ Deno.serve(async (req) => {
   }
 
   const startTime = Date.now()
+
+  // Store parsed body for error handling
+  let parsedBody: GenerateCodeRequest | null = null
 
   try {
     // Environment variables
@@ -238,8 +242,9 @@ Deno.serve(async (req) => {
     }
     console.log('[generate-variant-code] User authenticated:', user.id)
 
-    // Parse request
-    const body: GenerateCodeRequest = await req.json()
+    // Parse request and store for error handling
+    parsedBody = await req.json()
+    const body = parsedBody
     console.log('[generate-variant-code] Generating variant', body.variantIndex, 'for session:', body.sessionId)
 
     if (!body.sessionId || !body.planId || !body.variantIndex || !body.plan || !body.sourceHtml) {
@@ -349,6 +354,11 @@ Deno.serve(async (req) => {
 
     if (saveError) {
       console.error('[generate-variant-code] Failed to save variant:', saveError)
+      throw new Error(`Failed to save variant to database: ${saveError.message}`)
+    }
+
+    if (!savedVariant) {
+      throw new Error('Variant saved but no data returned')
     }
 
     // Check if all variants are complete
@@ -384,29 +394,38 @@ Deno.serve(async (req) => {
     )
 
   } catch (error) {
-    console.error('[generate-variant-code] Error:', error.message)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[generate-variant-code] Error:', errorMessage)
 
-    // Try to update variant status to failed
+    // Try to update variant status to failed using the already-parsed body
     try {
       const supabaseUrl = Deno.env.get('SUPABASE_URL')
       const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-      if (supabaseUrl && supabaseServiceKey) {
+      if (supabaseUrl && supabaseServiceKey && parsedBody?.sessionId && parsedBody?.variantIndex) {
         const supabase = createClient(supabaseUrl, supabaseServiceKey)
-        const body = await req.clone().json().catch(() => ({}))
-        if (body.sessionId && body.variantIndex) {
-          await supabase
-            .from('vibe_variants')
-            .update({ status: 'failed', error_message: error.message })
-            .eq('session_id', body.sessionId)
-            .eq('variant_index', body.variantIndex)
+        const { error: updateError } = await supabase
+          .from('vibe_variants')
+          .update({ status: 'failed', error_message: errorMessage })
+          .eq('session_id', parsedBody.sessionId)
+          .eq('variant_index', parsedBody.variantIndex)
+
+        if (updateError) {
+          console.error('[generate-variant-code] Failed to update variant status:', updateError)
+        } else {
+          console.log('[generate-variant-code] Variant status updated to failed')
         }
       }
-    } catch {
-      // Ignore cleanup errors
+    } catch (cleanupError) {
+      console.error('[generate-variant-code] Error during cleanup:', cleanupError)
     }
 
     return new Response(
-      JSON.stringify({ success: false, error: error.message }),
+      JSON.stringify({
+        success: false,
+        error: errorMessage,
+        variantIndex: parsedBody?.variantIndex,
+        sessionId: parsedBody?.sessionId,
+      }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

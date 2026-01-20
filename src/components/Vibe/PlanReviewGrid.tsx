@@ -23,6 +23,7 @@ interface PlanReviewGridProps {
   loadingMessage?: string;
   isApproved?: boolean;
   modelInfo?: { model: string; provider: string };
+  compact?: boolean;
 }
 
 export const PlanReviewGrid: React.FC<PlanReviewGridProps> = ({
@@ -34,6 +35,7 @@ export const PlanReviewGrid: React.FC<PlanReviewGridProps> = ({
   loadingMessage,
   isApproved = false,
   modelInfo,
+  compact = false,
 }) => {
   // Loading state
   if (isLoading) {
@@ -68,6 +70,24 @@ export const PlanReviewGrid: React.FC<PlanReviewGridProps> = ({
 
   // Sort plans by variant_index
   const sortedPlans = [...plans].sort((a, b) => a.variant_index - b.variant_index);
+
+  // Compact mode - just the grid, no header or actions
+  if (compact) {
+    return (
+      <Row gutter={[12, 12]}>
+        {sortedPlans.map((plan) => (
+          <Col key={plan.id} xs={24} sm={12} lg={6}>
+            <VariantPlanCard
+              plan={plan}
+              onUpdate={(updates) => onUpdatePlan?.(plan.variant_index, updates)}
+              isEditable={!isApproved}
+              compact
+            />
+          </Col>
+        ))}
+      </Row>
+    );
+  }
 
   return (
     <div>

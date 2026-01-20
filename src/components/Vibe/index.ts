@@ -9,3 +9,8 @@ export { PlanReviewGrid } from './PlanReviewGrid';
 export { GenerationProgress } from './GenerationProgress';
 export { VariantComparisonView } from './VariantComparisonView';
 export { VariantPreviewModal } from './VariantPreviewModal';
+
+// New vibe coding components
+export { ChatMessage, type ChatMessageData } from './ChatMessage';
+export { ChatPanel } from './ChatPanel';
+export { ScreenPreview, type SelectedTab } from './ScreenPreview';

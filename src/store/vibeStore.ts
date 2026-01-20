@@ -8,6 +8,19 @@ import type { UIMetadata } from '../services/screenAnalyzerService';
 import type { VibeSession, VariantPlan } from '../services/variantPlanService';
 import type { VibeVariant } from '../services/variantCodeService';
 
+// Chat message for the vibe coding interface
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: Date;
+  status?: 'pending' | 'complete' | 'error';
+  metadata?: {
+    variantIndex?: number;
+    stage?: string;
+  };
+}
+
 // Progress state
 export interface VibeProgress {
   stage: 'analyzing' | 'planning' | 'generating' | 'complete';
@@ -36,6 +49,9 @@ interface VibeState {
   plan: GeneratedPlan | null;
   variants: VibeVariant[];
 
+  // Chat messages for vibe coding interface
+  messages: ChatMessage[];
+
   // Status tracking
   status: VibeStatus;
   progress: VibeProgress | null;
@@ -45,6 +61,7 @@ interface VibeState {
   selectedVariantIndex: number | null;
   comparisonMode: ComparisonMode;
   previewVariantIndex: number | null;
+  previewTab: 'source' | 1 | 2 | 3 | 4;
 
   // Actions - Session management
   initSession: (session: VibeSession, sourceHtml: string) => void;
@@ -74,6 +91,12 @@ interface VibeState {
   selectVariant: (index: number | null) => void;
   setComparisonMode: (mode: ComparisonMode) => void;
   setPreviewVariant: (index: number | null) => void;
+  setPreviewTab: (tab: 'source' | 1 | 2 | 3 | 4) => void;
+
+  // Actions - Messages
+  addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => string;
+  updateMessage: (id: string, updates: Partial<ChatMessage>) => void;
+  clearMessages: () => void;
 
   // Computed getters
   getVariantByIndex: (index: number) => VibeVariant | undefined;
@@ -89,6 +112,7 @@ export const useVibeStore = create<VibeState>((set, get) => ({
   sourceMetadata: null,
   plan: null,
   variants: [],
+  messages: [],
 
   status: 'idle',
   progress: null,
@@ -97,6 +121,7 @@ export const useVibeStore = create<VibeState>((set, get) => ({
   selectedVariantIndex: null,
   comparisonMode: 'grid',
   previewVariantIndex: null,
+  previewTab: 'source',
 
   // Session management
   initSession: (session, sourceHtml) => {
@@ -106,11 +131,13 @@ export const useVibeStore = create<VibeState>((set, get) => ({
       sourceMetadata: null,
       plan: null,
       variants: [],
+      messages: [],
       status: session.status as VibeStatus,
       progress: null,
       error: null,
       selectedVariantIndex: session.selected_variant_index,
       previewVariantIndex: null,
+      previewTab: 'source',
     });
   },
 
@@ -130,11 +157,13 @@ export const useVibeStore = create<VibeState>((set, get) => ({
       sourceMetadata: null,
       plan: null,
       variants: [],
+      messages: [],
       status: 'idle',
       progress: null,
       error: null,
       selectedVariantIndex: null,
       previewVariantIndex: null,
+      previewTab: 'source',
     });
   },
 
@@ -271,6 +300,36 @@ export const useVibeStore = create<VibeState>((set, get) => ({
 
   setPreviewVariant: (index) => {
     set({ previewVariantIndex: index });
+  },
+
+  setPreviewTab: (tab) => {
+    set({ previewTab: tab });
+  },
+
+  // Messages
+  addMessage: (message) => {
+    const id = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const newMessage: ChatMessage = {
+      ...message,
+      id,
+      timestamp: new Date(),
+    };
+    set((state) => ({
+      messages: [...state.messages, newMessage],
+    }));
+    return id;
+  },
+
+  updateMessage: (id, updates) => {
+    set((state) => ({
+      messages: state.messages.map((msg) =>
+        msg.id === id ? { ...msg, ...updates } : msg
+      ),
+    }));
+  },
+
+  clearMessages: () => {
+    set({ messages: [] });
   },
 
   // Computed getters

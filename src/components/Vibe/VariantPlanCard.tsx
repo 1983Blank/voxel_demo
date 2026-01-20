@@ -24,6 +24,7 @@ interface VariantPlanCardProps {
   isEditable?: boolean;
   isSelected?: boolean;
   onSelect?: () => void;
+  compact?: boolean;
 }
 
 export const VariantPlanCard: React.FC<VariantPlanCardProps> = ({
@@ -32,6 +33,7 @@ export const VariantPlanCard: React.FC<VariantPlanCardProps> = ({
   isEditable = true,
   isSelected = false,
   onSelect,
+  compact = false,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(plan.title);
@@ -179,6 +181,21 @@ export const VariantPlanCard: React.FC<VariantPlanCardProps> = ({
             </Button>
           </Space>
         </Space>
+      ) : compact ? (
+        // Compact view - show only title and truncated description
+        <div>
+          <div style={{ marginBottom: 4 }}>
+            <BulbOutlined style={{ color, marginRight: 6, fontSize: 12 }} />
+            <Text strong style={{ fontSize: 12 }}>{plan.title}</Text>
+          </div>
+          <Paragraph
+            type="secondary"
+            style={{ fontSize: 11, marginBottom: 0 }}
+            ellipsis={{ rows: 2 }}
+          >
+            {plan.description}
+          </Paragraph>
+        </div>
       ) : (
         <Space direction="vertical" style={{ width: '100%' }} size="small">
           {/* Title */}

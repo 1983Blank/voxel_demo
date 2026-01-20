@@ -1,11 +1,10 @@
 /**
- * VibePrototyping Page
- * Plan-first variant generation workflow
+ * VibePrototyping Page - "Vibe Coding" Style Interface
  *
- * Flow:
- * 1. Select Screen → 2. Analyze UI → 3. Enter Prompt → 4. Review Plan (4 variants)
- *                                                              ↓
- * 5. Approve Plan → 6. Generate Code (sequential) → 7. Compare Variants → 8. Select Winner
+ * Split-panel layout:
+ * - Left: Screen preview with variant tabs
+ * - Right: Chat panel for prompts and AI responses
+ * - Bottom: Expandable sections for plans and source analysis
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -16,25 +15,23 @@ import {
   Space,
   Spin,
   message,
-  Row,
-  Col,
-  Steps,
   Alert,
-  Card,
   Result,
+  Collapse,
+  Badge,
+  Tag,
 } from 'antd';
 import {
   ArrowLeftOutlined,
   ThunderboltOutlined,
-  EyeOutlined,
+  SettingOutlined,
+  CheckCircleOutlined,
+  AppstoreOutlined,
   FileSearchOutlined,
-  BulbOutlined,
-  CodeOutlined,
-  TrophyOutlined,
 } from '@ant-design/icons';
 
 import { useScreensStore } from '@/store/screensStore';
-import { useVibeStore } from '@/store/vibeStore';
+import { useVibeStore, type ChatMessage } from '@/store/vibeStore';
 import { useContextStore } from '@/store/contextStore';
 
 import {
@@ -59,23 +56,15 @@ import {
 
 import {
   SourceAnalysisPanel,
-  PromptInputPanel,
   PlanReviewGrid,
-  GenerationProgress,
-  VariantComparisonView,
   VariantPreviewModal,
+  ChatPanel,
+  ScreenPreview,
+  type SelectedTab,
 } from '@/components/Vibe';
 
 const { Title, Text } = Typography;
-
-// Workflow steps
-const WORKFLOW_STEPS = [
-  { title: 'Analyze', icon: <FileSearchOutlined /> },
-  { title: 'Plan', icon: <BulbOutlined /> },
-  { title: 'Generate', icon: <CodeOutlined /> },
-  { title: 'Compare', icon: <EyeOutlined /> },
-  { title: 'Select', icon: <TrophyOutlined /> },
-];
+const { Panel } = Collapse;
 
 export const VibePrototyping: React.FC = () => {
   const { screenId, sessionId } = useParams<{ screenId: string; sessionId?: string }>();
@@ -91,12 +80,13 @@ export const VibePrototyping: React.FC = () => {
     sourceMetadata,
     plan,
     variants,
+    messages,
     status,
     progress,
     error,
     selectedVariantIndex,
-    comparisonMode,
     previewVariantIndex,
+    previewTab,
     initSession,
     setSession,
     clearSession,
@@ -110,8 +100,10 @@ export const VibePrototyping: React.FC = () => {
     setProgress,
     setError,
     selectVariant: storeSelectVariant,
-    setComparisonMode,
     setPreviewVariant,
+    setPreviewTab,
+    addMessage,
+    updateMessage,
     getPlanByIndex,
     getVariantByIndex,
   } = useVibeStore();
@@ -119,6 +111,7 @@ export const VibePrototyping: React.FC = () => {
   // Local state
   const [isLoading, setIsLoading] = useState(true);
   const [screen, setScreen] = useState<ReturnType<typeof getScreenById> | null>(null);
+  const [expandedSections, setExpandedSections] = useState<string[]>([]);
 
   // Initialize screen data
   useEffect(() => {
@@ -172,12 +165,28 @@ export const VibePrototyping: React.FC = () => {
     init();
   }, [screenId, sessionId]);
 
-  // Handle prompt submission
-  const handleSubmitPrompt = useCallback(
-    async (prompt: string, contextId?: string) => {
+  // Add chat message helper
+  const addChatMessage = useCallback(
+    (
+      role: ChatMessage['role'],
+      content: string,
+      status?: ChatMessage['status'],
+      metadata?: ChatMessage['metadata']
+    ) => {
+      return addMessage({ role, content, status, metadata });
+    },
+    [addMessage]
+  );
+
+  // Handle chat message submission
+  const handleSendMessage = useCallback(
+    async (prompt: string) => {
       if (!screen?.editedHtml || !screenId) return;
 
       try {
+        // Add user message
+        addChatMessage('user', prompt);
+
         // Create new session
         const sessionName = `Vibe: ${prompt.slice(0, 50)}${prompt.length > 50 ? '...' : ''}`;
         const session = await createVibeSession(screenId, sessionName, prompt);
@@ -189,8 +198,18 @@ export const VibePrototyping: React.FC = () => {
         // Initialize store with session
         initSession(session, screen.editedHtml);
 
+        // Re-add user message after init (which clears messages)
+        addChatMessage('user', prompt);
+
         // Update URL with session ID
         navigate(`/vibe/${screenId}/${session.id}`, { replace: true });
+
+        // Add analyzing message
+        const analyzingMsgId = addChatMessage(
+          'assistant',
+          'Analyzing the screen design...',
+          'pending'
+        );
 
         // Analyze screen if not cached
         setAnalyzing(true, 'Analyzing screen design...');
@@ -208,12 +227,18 @@ export const VibePrototyping: React.FC = () => {
           setSourceMetadata(metadata);
         }
 
-        // Get product context if selected
-        let productContext: string | undefined;
-        if (contextId) {
-          const ctx = contexts.find((c) => c.id === contextId);
-          productContext = ctx?.content;
-        }
+        // Update analyzing message
+        updateMessage(analyzingMsgId, {
+          content: 'Screen analysis complete. Now designing 4 variant concepts...',
+          status: 'complete',
+        });
+
+        // Add planning message
+        const planningMsgId = addChatMessage(
+          'assistant',
+          'AI is designing 4 different approaches based on your prompt...',
+          'pending'
+        );
 
         // Generate variant plan
         setStatus('planning');
@@ -228,7 +253,7 @@ export const VibePrototyping: React.FC = () => {
           prompt,
           screen.editedHtml,
           metadata,
-          productContext,
+          undefined,
           (p) => {
             setProgress({
               stage: 'planning',
@@ -246,9 +271,21 @@ export const VibePrototyping: React.FC = () => {
 
         setSession(result.session);
 
+        // Update planning message
+        updateMessage(planningMsgId, {
+          content: `Here are 4 variant concepts:\n\n${result.plans
+            .map((p, i) => `${i + 1}. **${p.title}**: ${p.description}`)
+            .join('\n\n')}\n\nReview and approve to generate the code.`,
+          status: 'complete',
+        });
+
+        // Expand plans section
+        setExpandedSections(['plans']);
       } catch (err) {
         console.error('Error generating plan:', err);
-        setError(err instanceof Error ? err.message : 'Failed to generate plan');
+        const errorMsg = err instanceof Error ? err.message : 'Failed to generate plan';
+        setError(errorMsg);
+        addChatMessage('assistant', `Error: ${errorMsg}`, 'error');
         message.error('Failed to generate variant plan');
       }
     },
@@ -265,6 +302,13 @@ export const VibePrototyping: React.FC = () => {
       if (session) {
         storeApprovePlan();
       }
+
+      // Add generating message
+      const generatingMsgId = addChatMessage(
+        'assistant',
+        'Starting code generation for all 4 variants...',
+        'pending'
+      );
 
       // Start generating variants
       setStatus('generating');
@@ -290,10 +334,19 @@ export const VibePrototyping: React.FC = () => {
             variantTitle: p.title,
           });
 
+          // Update message with progress
+          updateMessage(generatingMsgId, {
+            content: `Generating variants...\n\n${p.message}`,
+          });
+
           // Update individual variant in store as it completes
           if (p.stage === 'complete') {
-            // Refresh variant data
             getVariants(currentSession.id).then(setVariants);
+
+            // Auto-switch to completed variant tab
+            if (p.variantIndex) {
+              setPreviewTab(p.variantIndex as SelectedTab);
+            }
           }
         }
       );
@@ -301,11 +354,23 @@ export const VibePrototyping: React.FC = () => {
       setVariants(generatedVariants);
       setStatus('complete');
       setProgress(null);
-      message.success('All variants generated successfully!');
 
+      // Update final message
+      updateMessage(generatingMsgId, {
+        content:
+          'All 4 variants have been generated! Use the tabs below the preview to switch between them, and click to select a winner.',
+        status: 'complete',
+      });
+
+      // Collapse plans section
+      setExpandedSections([]);
+
+      message.success('All variants generated successfully!');
     } catch (err) {
       console.error('Error generating variants:', err);
-      setError(err instanceof Error ? err.message : 'Failed to generate variants');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to generate variants';
+      setError(errorMsg);
+      addChatMessage('assistant', `Error generating variants: ${errorMsg}`, 'error');
       message.error('Failed to generate variant code');
     }
   }, [currentSession, plan, screen, sourceMetadata]);
@@ -329,9 +394,9 @@ export const VibePrototyping: React.FC = () => {
 
   // Handle regenerate plan
   const handleRegeneratePlan = useCallback(() => {
-    // Clear current plan and go back to prompt input
     setStatus('idle');
     setPlan(null as unknown as { plans: VariantPlan[]; model: string; provider: string });
+    addChatMessage('system', 'Plan cleared. Enter a new prompt to generate variants.');
   }, []);
 
   // Handle variant selection
@@ -342,6 +407,12 @@ export const VibePrototyping: React.FC = () => {
       try {
         await selectVariant(currentSession.id, index);
         storeSelectVariant(index);
+        addChatMessage(
+          'assistant',
+          `Variant ${index} has been selected as the winner! You can now apply it to your screen.`,
+          'complete',
+          { variantIndex: index }
+        );
         message.success(`Variant ${index} selected as winner!`);
       } catch (err) {
         console.error('Error selecting variant:', err);
@@ -351,27 +422,13 @@ export const VibePrototyping: React.FC = () => {
     [currentSession]
   );
 
-  // Calculate current step
-  const getCurrentStep = () => {
-    switch (status) {
-      case 'idle':
-        return sourceMetadata ? 1 : 0;
-      case 'analyzing':
-        return 0;
-      case 'planning':
-        return 1;
-      case 'plan_ready':
-        return 2;
-      case 'generating':
-        return 2;
-      case 'complete':
-        return selectedVariantIndex ? 4 : 3;
-      case 'failed':
-        return -1;
-      default:
-        return 0;
-    }
-  };
+  // Handle tab change
+  const handleTabChange = useCallback(
+    (tab: SelectedTab) => {
+      setPreviewTab(tab);
+    },
+    [setPreviewTab]
+  );
 
   // Loading state
   if (isLoading) {
@@ -402,33 +459,69 @@ export const VibePrototyping: React.FC = () => {
   const previewPlan = previewVariantIndex ? getPlanByIndex(previewVariantIndex) : null;
   const previewVariant = previewVariantIndex ? getVariantByIndex(previewVariantIndex) : null;
 
+  // Status badge
+  const getStatusBadge = () => {
+    switch (status) {
+      case 'analyzing':
+        return <Tag color="processing">Analyzing</Tag>;
+      case 'planning':
+        return <Tag color="processing">Planning</Tag>;
+      case 'plan_ready':
+        return <Tag color="warning">Review Plan</Tag>;
+      case 'generating':
+        return <Tag color="processing">Generating</Tag>;
+      case 'complete':
+        return <Tag color="success" icon={<CheckCircleOutlined />}>Complete</Tag>;
+      case 'failed':
+        return <Tag color="error">Failed</Tag>;
+      default:
+        return <Tag>Ready</Tag>;
+    }
+  };
+
+  // Check if chat is active
+  const isChatActive = status === 'idle' || status === 'complete';
+  const isGenerating = status === 'analyzing' || status === 'planning' || status === 'generating';
+
   return (
-    <div style={{ padding: '0 24px 24px' }}>
+    <div style={{ height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div
+        style={{
+          padding: '12px 24px',
+          borderBottom: '1px solid #f0f0f0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#fff',
+        }}
+      >
         <Space>
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/screens')}
-          >
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/screens')}>
             Back
           </Button>
           <div>
-            <Title level={3} style={{ marginBottom: 0 }}>
-              <ThunderboltOutlined style={{ marginRight: 8, color: '#764ba2' }} />
-              Vibe Prototyping
-            </Title>
-            <Text type="secondary">{screen.name}</Text>
+            <Space align="center">
+              <ThunderboltOutlined style={{ fontSize: 20, color: '#764ba2' }} />
+              <Title level={4} style={{ marginBottom: 0 }}>
+                Vibe Prototyping
+              </Title>
+              {getStatusBadge()}
+            </Space>
+            <div>
+              <Text type="secondary">{screen.name}</Text>
+            </div>
           </div>
         </Space>
 
-        {/* Progress Steps */}
-        <Steps
-          size="small"
-          current={getCurrentStep()}
-          items={WORKFLOW_STEPS}
-          style={{ maxWidth: 600 }}
-        />
+        <Space>
+          {selectedVariantIndex && (
+            <Tag color="gold" icon={<CheckCircleOutlined />}>
+              Winner: Variant {selectedVariantIndex}
+            </Tag>
+          )}
+          <Button icon={<SettingOutlined />} type="text" />
+        </Space>
       </div>
 
       {/* Error Alert */}
@@ -440,102 +533,132 @@ export const VibePrototyping: React.FC = () => {
           showIcon
           closable
           onClose={() => setError(null)}
-          style={{ marginBottom: 16 }}
+          style={{ margin: '8px 24px' }}
         />
       )}
 
-      {/* Main Content */}
-      <Row gutter={24}>
-        {/* Left Sidebar - Source Analysis */}
-        <Col xs={24} lg={6}>
-          <SourceAnalysisPanel
-            sourceHtml={screen.editedHtml || null}
-            metadata={sourceMetadata}
-            isAnalyzing={status === 'analyzing'}
-            analysisMessage={progress?.message}
-          />
-        </Col>
-
-        {/* Main Area */}
-        <Col xs={24} lg={18}>
-          {/* Stage: Prompt Input */}
-          {(status === 'idle' || status === 'analyzing') && (
-            <PromptInputPanel
-              onSubmit={handleSubmitPrompt}
-              isLoading={status === 'analyzing'}
-              productContexts={contexts.map((c) => ({ id: c.id, name: c.name, type: c.type }))}
-              disabled={status === 'analyzing'}
-              defaultPrompt={currentSession?.prompt}
-            />
-          )}
-
-          {/* Stage: Planning */}
-          {status === 'planning' && (
-            <Card>
-              <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-                <Spin size="large" />
-                <div style={{ marginTop: 16 }}>
-                  <Title level={4}>AI is designing your variants...</Title>
-                  <Text type="secondary">{progress?.message}</Text>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* Stage: Plan Review */}
-          {status === 'plan_ready' && plan && (
-            <PlanReviewGrid
-              plans={plan.plans}
-              onUpdatePlan={handleUpdatePlan}
-              onApprove={handleApprovePlan}
-              onRegenerate={handleRegeneratePlan}
-              isApproved={currentSession?.plan_approved}
-              modelInfo={{ model: plan.model, provider: plan.provider }}
-            />
-          )}
-
-          {/* Stage: Generating */}
-          {status === 'generating' && plan && (
-            <Row gutter={24}>
-              <Col xs={24} lg={12}>
-                <GenerationProgress
-                  plans={plan.plans}
-                  variants={variants}
-                  currentVariantIndex={progress?.variantIndex}
-                  currentMessage={progress?.message}
-                  overallPercent={progress?.percent}
-                  error={error}
-                />
-              </Col>
-              <Col xs={24} lg={12}>
-                <VariantComparisonView
-                  plans={plan.plans}
-                  variants={variants}
-                  selectedVariantIndex={selectedVariantIndex}
-                  onSelectVariant={handleSelectVariant}
-                  onPreviewVariant={setPreviewVariant}
-                  comparisonMode={comparisonMode}
-                  onChangeMode={setComparisonMode}
-                  isGenerating
-                />
-              </Col>
-            </Row>
-          )}
-
-          {/* Stage: Complete */}
-          {status === 'complete' && plan && (
-            <VariantComparisonView
-              plans={plan.plans}
+      {/* Main Content - Split Panel */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* Left - Screen Preview */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, padding: 16, overflow: 'hidden' }}>
+            <ScreenPreview
+              sourceHtml={screen.editedHtml || null}
               variants={variants}
+              selectedTab={previewTab}
+              onTabChange={handleTabChange}
               selectedVariantIndex={selectedVariantIndex}
-              onSelectVariant={handleSelectVariant}
-              onPreviewVariant={setPreviewVariant}
-              comparisonMode={comparisonMode}
-              onChangeMode={setComparisonMode}
+              onExpandPreview={() => previewTab !== 'source' && setPreviewVariant(previewTab as number)}
+              isGenerating={isGenerating}
+              currentGeneratingIndex={progress?.variantIndex}
             />
+          </div>
+        </div>
+
+        {/* Right - Chat Panel */}
+        <div
+          style={{
+            width: 400,
+            borderLeft: '1px solid #f0f0f0',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div style={{ flex: 1, padding: 16, overflow: 'hidden' }}>
+            <ChatPanel
+              messages={messages}
+              onSendMessage={handleSendMessage}
+              isLoading={isGenerating}
+              disabled={!isChatActive && !isGenerating}
+              placeholder={
+                status === 'plan_ready'
+                  ? 'Approve the plan first to generate variants'
+                  : 'Describe your design changes...'
+              }
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom - Expandable Sections */}
+      <div style={{ borderTop: '1px solid #f0f0f0', backgroundColor: '#fafafa' }}>
+        <Collapse
+          activeKey={expandedSections}
+          onChange={(keys) => setExpandedSections(keys as string[])}
+          ghost
+          style={{ borderRadius: 0 }}
+        >
+          {/* Variant Plans */}
+          {(status === 'plan_ready' || plan) && (
+            <Panel
+              key="plans"
+              header={
+                <Space>
+                  <AppstoreOutlined />
+                  <span>Variant Plans</span>
+                  <Badge count={plan?.plans.length || 0} style={{ backgroundColor: '#1890ff' }} />
+                  {status === 'plan_ready' && (
+                    <Tag color="warning">Awaiting Approval</Tag>
+                  )}
+                </Space>
+              }
+              extra={
+                status === 'plan_ready' && (
+                  <Button
+                    type="primary"
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleApprovePlan();
+                    }}
+                  >
+                    Approve & Generate
+                  </Button>
+                )
+              }
+            >
+              {plan && (
+                <div style={{ padding: '8px 0' }}>
+                  <PlanReviewGrid
+                    plans={plan.plans}
+                    onUpdatePlan={handleUpdatePlan}
+                    onApprove={handleApprovePlan}
+                    onRegenerate={handleRegeneratePlan}
+                    isApproved={currentSession?.plan_approved}
+                    modelInfo={{ model: plan.model, provider: plan.provider }}
+                    compact
+                  />
+                </div>
+              )}
+            </Panel>
           )}
-        </Col>
-      </Row>
+
+          {/* Source Analysis */}
+          <Panel
+            key="analysis"
+            header={
+              <Space>
+                <FileSearchOutlined />
+                <span>Source Analysis</span>
+                {sourceMetadata && (
+                  <Tag color="green">
+                    {sourceMetadata.components.length} components
+                  </Tag>
+                )}
+              </Space>
+            }
+          >
+            <div style={{ padding: '8px 0', maxHeight: 300, overflow: 'auto' }}>
+              <SourceAnalysisPanel
+                sourceHtml={screen.editedHtml || null}
+                metadata={sourceMetadata}
+                isAnalyzing={status === 'analyzing'}
+                analysisMessage={progress?.message}
+              />
+            </div>
+          </Panel>
+        </Collapse>
+      </div>
 
       {/* Preview Modal */}
       <VariantPreviewModal
