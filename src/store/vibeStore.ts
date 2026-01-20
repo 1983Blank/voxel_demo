@@ -4,7 +4,7 @@
  */
 
 import { create } from 'zustand';
-import type { UIMetadata, ScreenUIMetadata } from '../services/screenAnalyzerService';
+import type { UIMetadata } from '../services/screenAnalyzerService';
 import type { VibeSession, VariantPlan } from '../services/variantPlanService';
 import type { VibeVariant } from '../services/variantCodeService';
 

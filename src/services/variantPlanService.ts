@@ -186,7 +186,8 @@ export async function generateVariantPlan(
     .eq('id', sessionId);
 
   // Compact HTML for smaller payload
-  const compactedHtml = compactHtml(html);
+  const compactionResult = await compactHtml(html, { method: 'combined-optimal' });
+  const compactedHtml = compactionResult.html;
 
   // Progress: Generating
   onProgress?.({

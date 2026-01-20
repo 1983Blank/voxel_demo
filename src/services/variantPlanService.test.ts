@@ -74,7 +74,7 @@ describe('variantPlanService', () => {
       vi.mocked(supabase.auth.getUser).mockResolvedValue({
         data: { user: null },
         error: null,
-      });
+      } as any);
 
       await expect(createVibeSession('screen-1', 'Test', 'Prompt')).rejects.toThrow('Not authenticated');
     });
@@ -175,18 +175,18 @@ describe('variantPlanService', () => {
       // Reset modules to ensure clean mocks
       vi.resetModules();
 
-      const { generateVariantPlan, getVibeSession } = await import('./variantPlanService');
+      const { generateVariantPlan } = await import('./variantPlanService');
 
       const mockSession = {
         access_token: 'test-token',
         refresh_token: 'refresh-token',
         expires_in: 3600,
-        token_type: 'bearer',
+        token_type: 'bearer' as const,
         user: { id: 'user-1', email: 'test@test.com', aud: 'authenticated', created_at: '' },
       };
 
       vi.mocked(supabase.auth.getSession).mockResolvedValue({
-        data: { session: mockSession },
+        data: { session: mockSession as any },
         error: null,
       });
 
@@ -212,7 +212,7 @@ describe('variantPlanService', () => {
       };
 
       // Mock supabase.from for update and select calls
-      vi.mocked(supabase.from).mockImplementation((table) => {
+      vi.mocked(supabase.from).mockImplementation(() => {
         return {
           update: vi.fn().mockReturnThis(),
           select: vi.fn().mockReturnThis(),

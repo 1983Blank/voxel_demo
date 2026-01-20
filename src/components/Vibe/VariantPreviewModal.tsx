@@ -20,7 +20,7 @@ import { getVibeVariantColor, getVibeVariantLabel } from '../../store/vibeStore'
 import type { VibeVariant } from '../../services/variantCodeService';
 import type { VariantPlan } from '../../services/variantPlanService';
 
-const { Text, Title } = Typography;
+const { Title } = Typography;
 
 interface VariantPreviewModalProps {
   open: boolean;

@@ -21,7 +21,7 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 // Mock ResizeObserver as a class
-global.ResizeObserver = class ResizeObserver {
+globalThis.ResizeObserver = class ResizeObserver {
   callback: ResizeObserverCallback;
   constructor(callback: ResizeObserverCallback) {
     this.callback = callback;
@@ -32,7 +32,7 @@ global.ResizeObserver = class ResizeObserver {
 };
 
 // Mock IntersectionObserver
-global.IntersectionObserver = class IntersectionObserver {
+globalThis.IntersectionObserver = class IntersectionObserver {
   constructor() {}
   observe() {}
   unobserve() {}
@@ -45,8 +45,8 @@ window.getComputedStyle = vi.fn().mockReturnValue({
 });
 
 // Mock URL.createObjectURL
-global.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
-global.URL.revokeObjectURL = vi.fn();
+globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+globalThis.URL.revokeObjectURL = vi.fn();
 
 // Mock clipboard
 Object.assign(navigator, {
@@ -57,7 +57,7 @@ Object.assign(navigator, {
 });
 
 // Mock fetch
-global.fetch = vi.fn();
+globalThis.fetch = vi.fn();
 
 // Mock Supabase client
 vi.mock('@/services/supabase', () => ({

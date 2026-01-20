@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useVibeStore, getVibeVariantColor, getVibeVariantLabel, VIBE_VARIANT_COLORS, VIBE_VARIANT_LABELS } from './vibeStore';
+import { useVibeStore, getVibeVariantColor, getVibeVariantLabel, VIBE_VARIANT_COLORS } from './vibeStore';
 import type { VibeSession, VariantPlan } from '../services/variantPlanService';
 import type { VibeVariant } from '../services/variantCodeService';
 
@@ -117,7 +117,7 @@ describe('vibeStore', () => {
     });
 
     it('should update plan item correctly', () => {
-      const { setPlan, updatePlanItem, getPlanByIndex } = useVibeStore.getState();
+      const { setPlan, updatePlanItem } = useVibeStore.getState();
       setPlan({ plans: mockPlans, model: 'claude-sonnet', provider: 'anthropic' });
 
       updatePlanItem(1, { title: 'Updated Conservative' });
@@ -153,7 +153,7 @@ describe('vibeStore', () => {
     });
 
     it('should get plan by index correctly', () => {
-      const { setPlan, getPlanByIndex } = useVibeStore.getState();
+      const { setPlan } = useVibeStore.getState();
       setPlan({ plans: mockPlans, model: 'claude-sonnet', provider: 'anthropic' });
 
       const plan = useVibeStore.getState().getPlanByIndex(2);
@@ -222,7 +222,7 @@ describe('vibeStore', () => {
     });
 
     it('should update variant correctly', () => {
-      const { setVariants, updateVariant, getVariantByIndex } = useVibeStore.getState();
+      const { setVariants, updateVariant } = useVibeStore.getState();
       setVariants(mockVariants);
 
       updateVariant(1, { status: 'failed', error_message: 'Test error' });
@@ -253,7 +253,7 @@ describe('vibeStore', () => {
         updated_at: '',
       }));
 
-      const { setVariants, isAllVariantsComplete, getCompletedVariantsCount } = useVibeStore.getState();
+      const { setVariants } = useVibeStore.getState();
       setVariants(allCompleteVariants);
 
       expect(useVibeStore.getState().isAllVariantsComplete()).toBe(true);

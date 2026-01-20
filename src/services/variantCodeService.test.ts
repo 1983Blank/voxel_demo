@@ -166,12 +166,12 @@ describe('variantCodeService', () => {
         access_token: 'test-token',
         refresh_token: 'refresh-token',
         expires_in: 3600,
-        token_type: 'bearer',
+        token_type: 'bearer' as const,
         user: { id: 'user-1', email: 'test@test.com', aud: 'authenticated', created_at: '' },
       };
 
       vi.mocked(supabase.auth.getSession).mockResolvedValue({
-        data: { session: mockSession },
+        data: { session: mockSession as any },
         error: null,
       });
 
@@ -360,7 +360,7 @@ describe('variantCodeService', () => {
 
       const mockHtml = '<!DOCTYPE html><html><body>Test</body></html>';
 
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         text: vi.fn().mockResolvedValue(mockHtml),
       });
@@ -374,7 +374,7 @@ describe('variantCodeService', () => {
     it('should throw error on fetch failure', async () => {
       const { fetchVariantHtml } = await import('./variantCodeService');
 
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 404,
       });

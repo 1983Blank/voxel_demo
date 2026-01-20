@@ -11,12 +11,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Layout,
   Typography,
   Button,
   Space,
   Spin,
-  Empty,
   message,
   Row,
   Col,
@@ -28,7 +26,6 @@ import {
 import {
   ArrowLeftOutlined,
   ThunderboltOutlined,
-  CheckCircleOutlined,
   EyeOutlined,
   FileSearchOutlined,
   BulbOutlined,
@@ -37,7 +34,7 @@ import {
 } from '@ant-design/icons';
 
 import { useScreensStore } from '@/store/screensStore';
-import { useVibeStore, type ComparisonMode } from '@/store/vibeStore';
+import { useVibeStore } from '@/store/vibeStore';
 import { useContextStore } from '@/store/contextStore';
 
 import {
@@ -52,14 +49,12 @@ import {
   getVariantPlans,
   approvePlan,
   updateVariantPlan,
-  type VibeSession,
   type VariantPlan,
 } from '@/services/variantPlanService';
 import {
   generateAllVariants,
   getVariants,
   selectVariant,
-  type VibeVariant,
 } from '@/services/variantCodeService';
 
 import {
@@ -87,13 +82,12 @@ export const VibePrototyping: React.FC = () => {
   const navigate = useNavigate();
 
   // External stores
-  const { getScreen, fetchScreens, screens } = useScreensStore();
+  const { getScreenById, initializeScreens, screens } = useScreensStore();
   const { contexts } = useContextStore();
 
   // Vibe store
   const {
     currentSession,
-    sourceHtml,
     sourceMetadata,
     plan,
     variants,
@@ -112,7 +106,6 @@ export const VibePrototyping: React.FC = () => {
     updatePlanItem,
     approvePlan: storeApprovePlan,
     setVariants,
-    addVariant,
     setStatus,
     setProgress,
     setError,
@@ -125,7 +118,7 @@ export const VibePrototyping: React.FC = () => {
 
   // Local state
   const [isLoading, setIsLoading] = useState(true);
-  const [screen, setScreen] = useState<ReturnType<typeof getScreen> | null>(null);
+  const [screen, setScreen] = useState<ReturnType<typeof getScreenById> | null>(null);
 
   // Initialize screen data
   useEffect(() => {
@@ -134,15 +127,15 @@ export const VibePrototyping: React.FC = () => {
 
       // Fetch screens if empty
       if (screens.length === 0) {
-        await fetchScreens();
+        await initializeScreens();
       }
 
       // Get screen
       if (screenId) {
-        const s = getScreen(screenId);
+        const s = getScreenById(screenId);
         setScreen(s);
 
-        if (s?.html) {
+        if (s?.editedHtml) {
           // Check for cached metadata
           const cached = await getCachedMetadata(screenId);
           if (cached) {
@@ -153,7 +146,7 @@ export const VibePrototyping: React.FC = () => {
           if (sessionId) {
             const session = await getVibeSession(sessionId);
             if (session) {
-              initSession(session, s.html);
+              initSession(session, s.editedHtml);
 
               // Load plans and variants
               const plans = await getVariantPlans(sessionId);
@@ -182,7 +175,7 @@ export const VibePrototyping: React.FC = () => {
   // Handle prompt submission
   const handleSubmitPrompt = useCallback(
     async (prompt: string, contextId?: string) => {
-      if (!screen?.html || !screenId) return;
+      if (!screen?.editedHtml || !screenId) return;
 
       try {
         // Create new session
@@ -194,7 +187,7 @@ export const VibePrototyping: React.FC = () => {
         }
 
         // Initialize store with session
-        initSession(session, screen.html);
+        initSession(session, screen.editedHtml);
 
         // Update URL with session ID
         navigate(`/vibe/${screenId}/${session.id}`, { replace: true });
@@ -204,7 +197,7 @@ export const VibePrototyping: React.FC = () => {
 
         let metadata = sourceMetadata;
         if (!metadata) {
-          const result = await analyzeScreen(screenId, screen.html, (p) => {
+          const result = await analyzeScreen(screenId, screen.editedHtml, (p) => {
             setProgress({
               stage: 'analyzing',
               message: p.message,
@@ -233,7 +226,7 @@ export const VibePrototyping: React.FC = () => {
         const result = await generateVariantPlan(
           session.id,
           prompt,
-          screen.html,
+          screen.editedHtml,
           metadata,
           productContext,
           (p) => {
@@ -264,7 +257,7 @@ export const VibePrototyping: React.FC = () => {
 
   // Handle plan approval
   const handleApprovePlan = useCallback(async () => {
-    if (!currentSession?.id || !plan || !screen?.html) return;
+    if (!currentSession?.id || !plan || !screen?.editedHtml) return;
 
     try {
       // Approve plan in database
@@ -285,7 +278,7 @@ export const VibePrototyping: React.FC = () => {
       const generatedVariants = await generateAllVariants(
         currentSession.id,
         plan.plans,
-        screen.html,
+        screen.editedHtml,
         sourceMetadata || undefined,
         undefined,
         (p) => {
@@ -456,7 +449,7 @@ export const VibePrototyping: React.FC = () => {
         {/* Left Sidebar - Source Analysis */}
         <Col xs={24} lg={6}>
           <SourceAnalysisPanel
-            sourceHtml={screen.html || null}
+            sourceHtml={screen.editedHtml || null}
             metadata={sourceMetadata}
             isAnalyzing={status === 'analyzing'}
             analysisMessage={progress?.message}

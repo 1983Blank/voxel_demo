@@ -15,7 +15,7 @@ import {
 } from '@ant-design/icons';
 import type { UIMetadata } from '../../services/screenAnalyzerService';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 const { Panel } = Collapse;
 
 interface SourceAnalysisPanelProps {
@@ -248,7 +248,7 @@ export const SourceAnalysisPanel: React.FC<SourceAnalysisPanelProps> = ({
                     }}
                   >
                     <Text style={{ textTransform: 'capitalize' }}>{comp.type}</Text>
-                    <Tag size="small">{comp.count}</Tag>
+                    <Tag>{comp.count}</Tag>
                   </div>
                 </Col>
               ))}
